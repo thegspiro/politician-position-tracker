@@ -1,23 +1,12 @@
 services:
-  backend:
-    build: ./backend
-    container_name: politician-tracker-backend
-    restart: unless-stopped
-    volumes:
-      - db-data:/app/data
-    environment:
-      - DATABASE_URL=sqlite:///./data/politician_tracker.db
-    expose:
-      - "8000"
-
-  frontend:
-    build: ./frontend
-    container_name: politician-tracker-frontend
+  politician-tracker:
+    build: .
+    container_name: politician-tracker
     restart: unless-stopped
     ports:
-      - "8085:80"
-    depends_on:
-      - backend
+      - "8085:8000"
+    volumes:
+      - db-data:/app/data
 
 volumes:
   db-data:
