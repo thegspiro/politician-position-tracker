@@ -4,9 +4,12 @@ services:
     container_name: politician-tracker
     restart: unless-stopped
     ports:
-      - "8085:8000"
+      - "9847:8000"
     volumes:
       - db-data:/app/data
+    environment:
+      - ADMIN_PASSWORD=changeme
+      - SECRET_KEY=change-this-to-a-random-string
 
 volumes:
   db-data:

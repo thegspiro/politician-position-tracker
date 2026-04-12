@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
 import { fetchStatement } from '../api';
 import type { Statement } from '../types';
 
@@ -56,11 +57,166 @@ function platformIcon(platform: string): React.ReactNode {
       </svg>
     );
   }
+  if (p === 'bluesky') {
+    return (
+      <svg className={baseClass} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 10.8c-1.087-2.114-4.046-6.053-6.798-7.995C2.566.944 1.561 1.266.902 1.565.139 1.908 0 3.08 0 3.768c0 .69.378 5.65.624 6.479.785 2.627 3.6 3.502 6.204 3.17-4.024.578-7.577 2.199-3.844 7.683 4.245 5.709 7.672-.927 9.016-5.27.344-1.108.508-1.627.508-1.188 0-.44.164.08.508 1.188 1.344 4.343 4.771 10.979 9.016 5.27 3.733-5.484.18-7.105-3.844-7.683 2.604.332 5.42-.543 6.204-3.17.246-.828.624-5.79.624-6.479 0-.688-.139-1.86-.902-2.203-.66-.299-1.664-.62-4.3 1.24C16.046 4.748 13.087 8.687 12 10.8z" />
+      </svg>
+    );
+  }
+  if (p === 'truth social') {
+    return (
+      <span className={`${baseClass} font-bold text-sm leading-5 text-center`}>T</span>
+    );
+  }
   // Generic link icon
   return (
     <svg className={baseClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
     </svg>
+  );
+}
+
+function getYouTubeVideoId(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes('youtube.com') || u.hostname.includes('youtube-nocookie.com')) {
+      return u.searchParams.get('v');
+    }
+    if (u.hostname === 'youtu.be') {
+      return u.pathname.slice(1).split('/')[0] || null;
+    }
+  } catch {
+    // invalid URL
+  }
+  return null;
+}
+
+function EmbedPost({
+  platform,
+  url,
+  content,
+}: {
+  platform: string;
+  url: string;
+  content: string | null;
+}) {
+  const p = platform.toLowerCase();
+
+  useEffect(() => {
+    if (p === 'twitter' || p === 'x') {
+      const existing = document.querySelector('script[src="https://platform.twitter.com/widgets.js"]');
+      if (!existing) {
+        const script = document.createElement('script');
+        script.src = 'https://platform.twitter.com/widgets.js';
+        script.async = true;
+        script.charset = 'utf-8';
+        document.body.appendChild(script);
+      } else if ((window as unknown as Record<string, unknown>).twttr) {
+        // Re-render widgets if script already loaded
+        (
+          (window as unknown as Record<string, unknown>).twttr as {
+            widgets: { load: () => void };
+          }
+        ).widgets.load();
+      }
+    }
+
+    if (p === 'bluesky') {
+      const existing = document.querySelector('script[src="https://embed.bsky.app/static/embed.js"]');
+      if (!existing) {
+        const script = document.createElement('script');
+        script.src = 'https://embed.bsky.app/static/embed.js';
+        script.async = true;
+        script.charset = 'utf-8';
+        document.body.appendChild(script);
+      }
+    }
+  }, [p]);
+
+  // X / Twitter embed
+  if (p === 'twitter' || p === 'x') {
+    return (
+      <blockquote className="twitter-tweet">
+        {content && <p>{content}</p>}
+        <a href={url}>{url}</a>
+      </blockquote>
+    );
+  }
+
+  // YouTube embed
+  if (p === 'youtube') {
+    const videoId = getYouTubeVideoId(url);
+    if (videoId) {
+      return (
+        <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+          <iframe
+            className="absolute inset-0 w-full h-full rounded-lg"
+            src={`https://www.youtube-nocookie.com/embed/${videoId}`}
+            title="YouTube video"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      );
+    }
+  }
+
+  // Bluesky embed
+  if (p === 'bluesky') {
+    // Convert Bluesky web URL to AT URI for the embed
+    // URL format: https://bsky.app/profile/{handle}/post/{rkey}
+    let atUri = url;
+    try {
+      const u = new URL(url);
+      const parts = u.pathname.split('/');
+      // /profile/{handle}/post/{rkey}
+      const profileIdx = parts.indexOf('profile');
+      const postIdx = parts.indexOf('post');
+      if (profileIdx !== -1 && postIdx !== -1) {
+        const handle = parts[profileIdx + 1];
+        const rkey = parts[postIdx + 1];
+        atUri = `at://${handle}/app.bsky.feed.post/${rkey}`;
+      }
+    } catch {
+      // keep original url
+    }
+
+    return (
+      <blockquote
+        className="bluesky-embed"
+        data-bluesky-uri={atUri}
+        data-bluesky-cid=""
+      >
+        {content && (
+          <p className="text-[var(--color-text)] text-sm leading-relaxed italic whitespace-pre-wrap mb-2">
+            {content}
+          </p>
+        )}
+        <a href={url}>{url}</a>
+      </blockquote>
+    );
+  }
+
+  // Truth Social and others: styled blockquote + link fallback
+  return (
+    <div>
+      {content && (
+        <blockquote className="border-l-4 border-[var(--color-accent)] pl-4 py-2 my-3">
+          <p className="text-[var(--color-text)] text-sm leading-relaxed italic whitespace-pre-wrap">
+            {content}
+          </p>
+        </blockquote>
+      )}
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-sm font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition break-all"
+      >
+        View original post
+      </a>
+    </div>
   );
 }
 
@@ -212,14 +368,17 @@ export default function StatementDetailPage() {
         )}
       </div>
 
-      {/* Issue badge */}
-      <div className="mb-4">
-        <Link
-          to={`/issues/${statement.issue.id}`}
-          className="inline-block text-xs font-medium px-2.5 py-0.5 rounded-full bg-[var(--color-badge-bg)] text-[var(--color-badge-text)] hover:opacity-80 transition"
-        >
-          {statement.issue.name}
-        </Link>
+      {/* Issue badges */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {statement.issues.map((issue) => (
+          <Link
+            key={issue.id}
+            to={`/issues/${issue.id}`}
+            className="inline-block text-xs font-medium px-2.5 py-0.5 rounded-full bg-[var(--color-badge-bg)] text-[var(--color-badge-text)] hover:opacity-80 transition"
+          >
+            {issue.name}
+          </Link>
+        ))}
       </div>
 
       {/* Title */}
@@ -246,13 +405,11 @@ export default function StatementDetailPage() {
           </a>
         </div>
 
-        {statement.post_content && (
-          <blockquote className="border-l-4 border-[var(--color-accent)] pl-4 py-2 my-3">
-            <p className="text-[var(--color-text)] text-sm leading-relaxed italic whitespace-pre-wrap">
-              {statement.post_content}
-            </p>
-          </blockquote>
-        )}
+        <EmbedPost
+          platform={statement.post_platform}
+          url={statement.post_url}
+          content={statement.post_content}
+        />
 
         {statement.screenshot_url && (
           <img
@@ -266,8 +423,8 @@ export default function StatementDetailPage() {
       {/* Full analysis */}
       <div className="mb-8">
         <h2 className="text-xl font-semibold text-[var(--color-text)] mb-3">Analysis</h2>
-        <div className="text-[var(--color-text)] leading-relaxed whitespace-pre-wrap">
-          {statement.analysis}
+        <div className="prose text-[var(--color-text)] leading-relaxed">
+          <ReactMarkdown>{statement.analysis}</ReactMarkdown>
         </div>
       </div>
 

@@ -1,9 +1,18 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Table, Text
 from sqlalchemy.orm import relationship
 
 from .database import Base
+
+
+# Many-to-many association table for statements <-> issues
+statement_issues = Table(
+    "statement_issues",
+    Base.metadata,
+    Column("statement_id", Integer, ForeignKey("statements.id", ondelete="CASCADE"), primary_key=True),
+    Column("issue_id", Integer, ForeignKey("issues.id", ondelete="CASCADE"), primary_key=True),
+)
 
 
 class Politician(Base):
@@ -29,7 +38,7 @@ class Issue(Base):
     description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    statements = relationship("Statement", back_populates="issue", cascade="all, delete-orphan")
+    statements = relationship("Statement", secondary=statement_issues, back_populates="issues")
 
 
 class Statement(Base):
@@ -37,7 +46,6 @@ class Statement(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     politician_id = Column(Integer, ForeignKey("politicians.id"), nullable=False)
-    issue_id = Column(Integer, ForeignKey("issues.id"), nullable=False)
     title = Column(String(500), nullable=False)
     analysis = Column(Text, nullable=False)
     post_url = Column(String(1000), nullable=False)
@@ -49,7 +57,7 @@ class Statement(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     politician = relationship("Politician", back_populates="statements")
-    issue = relationship("Issue", back_populates="statements")
+    issues = relationship("Issue", secondary=statement_issues, back_populates="statements")
     sources = relationship("Source", back_populates="statement", cascade="all, delete-orphan")
 
 

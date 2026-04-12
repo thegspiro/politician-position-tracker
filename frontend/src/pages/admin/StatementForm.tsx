@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   fetchStatement,
@@ -6,8 +6,10 @@ import {
   fetchIssues,
   createStatement,
   updateStatement,
+  uploadFile,
 } from '../../api';
 import type { Politician, Issue, SourceInput } from '../../types';
+import { useToast } from '../../Toast';
 
 const PLATFORMS = ['X', 'Bluesky', 'Truth Social', 'YouTube'];
 
@@ -19,6 +21,7 @@ export default function StatementForm() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const isEdit = Boolean(id);
+  const { toast } = useToast();
 
   // Dropdown data
   const [politicians, setPoliticians] = useState<Politician[]>([]);
@@ -26,7 +29,7 @@ export default function StatementForm() {
 
   // Form fields
   const [politicianId, setPoliticianId] = useState('');
-  const [issueId, setIssueId] = useState('');
+  const [issueIds, setIssueIds] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [postUrl, setPostUrl] = useState('');
   const [postPlatform, setPostPlatform] = useState('');
@@ -37,23 +40,26 @@ export default function StatementForm() {
   const [postSources, setPostSources] = useState<SourceInput[]>([]);
   const [analysisSources, setAnalysisSources] = useState<SourceInput[]>([]);
 
+  // Upload state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
   // UI state
   const [loading, setLoading] = useState(false);
   const [fetchLoading, setFetchLoading] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [pols, iss] = await Promise.all([fetchPoliticians(), fetchIssues()]);
-        setPoliticians(pols);
-        setIssues(iss);
+        const [polsRes, issRes] = await Promise.all([fetchPoliticians(), fetchIssues()]);
+        setPoliticians(polsRes.items);
+        setIssues(issRes.items);
 
         if (id) {
           const stmt = await fetchStatement(id);
           setPoliticianId(String(stmt.politician_id));
-          setIssueId(String(stmt.issue_id));
+          setIssueIds(stmt.issues.map((i) => String(i.id)));
           setTitle(stmt.title);
           setPostUrl(stmt.post_url);
           setPostPlatform(stmt.post_platform);
@@ -85,18 +91,24 @@ export default function StatementForm() {
           }
         }
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : 'Failed to load data');
+        toast(err instanceof Error ? err.message : 'Failed to load data', 'error');
       } finally {
         setFetchLoading(false);
       }
     }
     loadData();
-  }, [id]);
+  }, [id, toast]);
+
+  function toggleIssue(issueId: string) {
+    setIssueIds((prev) =>
+      prev.includes(issueId) ? prev.filter((i) => i !== issueId) : [...prev, issueId],
+    );
+  }
 
   function validate(): boolean {
     const newErrors: Record<string, string> = {};
     if (!politicianId) newErrors.politicianId = 'Politician is required';
-    if (!issueId) newErrors.issueId = 'Issue is required';
+    if (issueIds.length === 0) newErrors.issueIds = 'At least one issue is required';
     if (!title.trim()) newErrors.title = 'Title is required';
     if (!postUrl.trim()) newErrors.postUrl = 'Post URL is required';
     if (!postPlatform) newErrors.postPlatform = 'Post Platform is required';
@@ -126,12 +138,29 @@ export default function StatementForm() {
     setter((prev) => prev.filter((_, i) => i !== index));
   }
 
+  async function handleUpload() {
+    const file = fileInputRef.current?.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const result = await uploadFile(file);
+      setScreenshotUrl(result.url);
+      toast('File uploaded successfully', 'success');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to upload file', 'error');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!validate()) return;
 
     setLoading(true);
-    setSubmitError(null);
 
     const allSources = [...postSources, ...analysisSources].filter(
       (s) => s.title.trim() && s.url.trim(),
@@ -139,7 +168,7 @@ export default function StatementForm() {
 
     const data = {
       politician_id: Number(politicianId),
-      issue_id: Number(issueId),
+      issue_ids: issueIds.map(Number),
       title: title.trim(),
       post_url: postUrl.trim(),
       post_platform: postPlatform,
@@ -156,9 +185,10 @@ export default function StatementForm() {
       } else {
         await createStatement(data);
       }
+      toast('Statement saved!', 'success');
       navigate('/admin');
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Failed to save statement');
+      toast(err instanceof Error ? err.message : 'Failed to save statement', 'error');
     } finally {
       setLoading(false);
     }
@@ -185,12 +215,6 @@ export default function StatementForm() {
         onSubmit={handleSubmit}
         className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-xl p-6 space-y-5"
       >
-        {submitError && (
-          <div className="p-3 bg-[var(--color-danger)]/10 border border-[var(--color-danger)] rounded-lg text-[var(--color-danger)] text-sm">
-            {submitError}
-          </div>
-        )}
-
         {/* Politician */}
         <div>
           <label htmlFor="politicianId" className="block text-sm font-medium text-[var(--color-text)] mb-1">
@@ -214,26 +238,37 @@ export default function StatementForm() {
           )}
         </div>
 
-        {/* Issue */}
+        {/* Issues (multi-select) */}
         <div>
-          <label htmlFor="issueId" className="block text-sm font-medium text-[var(--color-text)] mb-1">
-            Issue <span className="text-[var(--color-danger)]">*</span>
+          <label className="block text-sm font-medium text-[var(--color-text)] mb-1">
+            Issues <span className="text-[var(--color-danger)]">*</span>
           </label>
-          <select
-            id="issueId"
-            value={issueId}
-            onChange={(e) => setIssueId(e.target.value)}
-            className={inputClass}
-          >
-            <option value="">Select an issue</option>
-            {issues.map((iss) => (
-              <option key={iss.id} value={iss.id}>
-                {iss.name}
-              </option>
-            ))}
-          </select>
-          {errors.issueId && (
-            <p className="mt-1 text-sm text-[var(--color-danger)]">{errors.issueId}</p>
+          <div className="flex flex-wrap gap-2">
+            {issues.map((iss) => {
+              const selected = issueIds.includes(String(iss.id));
+              return (
+                <button
+                  key={iss.id}
+                  type="button"
+                  onClick={() => toggleIssue(String(iss.id))}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition ${
+                    selected
+                      ? 'bg-[var(--color-accent)] text-white border-[var(--color-accent)]'
+                      : 'bg-[var(--color-bg)] text-[var(--color-text-secondary)] border-[var(--color-border)] hover:border-[var(--color-accent)]'
+                  }`}
+                >
+                  {iss.name}
+                </button>
+              );
+            })}
+          </div>
+          {issues.length === 0 && (
+            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+              No issues available. Create one first.
+            </p>
+          )}
+          {errors.issueIds && (
+            <p className="mt-1 text-sm text-[var(--color-danger)]">{errors.issueIds}</p>
           )}
         </div>
 
@@ -309,19 +344,37 @@ export default function StatementForm() {
           />
         </div>
 
-        {/* Screenshot URL */}
+        {/* Screenshot URL + Upload */}
         <div>
           <label htmlFor="screenshotUrl" className="block text-sm font-medium text-[var(--color-text)] mb-1">
             Screenshot URL
           </label>
-          <input
-            id="screenshotUrl"
-            type="url"
-            value={screenshotUrl}
-            onChange={(e) => setScreenshotUrl(e.target.value)}
-            className={inputClass}
-            placeholder="https://example.com/screenshot.png"
-          />
+          <div className="flex gap-2">
+            <input
+              id="screenshotUrl"
+              type="url"
+              value={screenshotUrl}
+              onChange={(e) => setScreenshotUrl(e.target.value)}
+              className={inputClass}
+              placeholder="https://example.com/screenshot.png"
+            />
+          </div>
+          <div className="flex items-center gap-2 mt-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="text-sm text-[var(--color-text-secondary)] file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border file:border-[var(--color-border)] file:bg-[var(--color-bg-secondary)] file:text-[var(--color-text)] file:text-sm file:font-medium file:cursor-pointer hover:file:bg-[var(--color-border)] file:transition"
+            />
+            <button
+              type="button"
+              onClick={handleUpload}
+              disabled={uploading}
+              className="px-3 py-1 text-sm bg-[var(--color-accent)] text-white rounded-lg hover:bg-[var(--color-accent-hover)] transition font-medium disabled:opacity-50 whitespace-nowrap"
+            >
+              {uploading ? 'Uploading...' : 'Upload'}
+            </button>
+          </div>
         </div>
 
         {/* Post Date */}

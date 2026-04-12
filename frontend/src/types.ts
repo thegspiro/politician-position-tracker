@@ -34,7 +34,6 @@ export interface SourceInput {
 export interface Statement {
   id: number;
   politician_id: number;
-  issue_id: number;
   title: string;
   analysis: string;
   post_url: string;
@@ -45,7 +44,7 @@ export interface Statement {
   created_at: string;
   updated_at: string;
   politician: Politician;
-  issue: Issue;
+  issues: Issue[];
   sources?: Source[];
 }
 
@@ -55,4 +54,11 @@ export interface PoliticianDetail extends Politician {
 
 export interface IssueDetail extends Issue {
   statements: Statement[];
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  skip: number;
+  limit: number;
 }

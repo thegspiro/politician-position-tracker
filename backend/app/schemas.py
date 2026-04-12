@@ -1,6 +1,17 @@
 from datetime import datetime
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel
+
+T = TypeVar("T")
+
+
+# --- Paginated Response ---
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: list[T]
+    total: int
+    skip: int
+    limit: int
 
 
 # --- Source ---
@@ -72,24 +83,23 @@ class StatementBase(BaseModel):
 
 class StatementCreate(StatementBase):
     politician_id: int
-    issue_id: int
+    issue_ids: list[int] = []
     sources: list[SourceCreate] = []
 
 
 class StatementUpdate(StatementBase):
     politician_id: int
-    issue_id: int
+    issue_ids: list[int] = []
     sources: list[SourceCreate] = []
 
 
 class StatementOut(StatementBase):
     id: int
     politician_id: int
-    issue_id: int
     created_at: datetime
     updated_at: datetime
     politician: PoliticianOut
-    issue: IssueOut
+    issues: list[IssueOut] = []
     sources: list[SourceOut] = []
 
     model_config = {"from_attributes": True}
@@ -98,11 +108,10 @@ class StatementOut(StatementBase):
 class StatementListOut(StatementBase):
     id: int
     politician_id: int
-    issue_id: int
     created_at: datetime
     updated_at: datetime
     politician: PoliticianOut
-    issue: IssueOut
+    issues: list[IssueOut] = []
 
     model_config = {"from_attributes": True}
 

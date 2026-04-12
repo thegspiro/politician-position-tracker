@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchStatements, fetchPoliticians, fetchIssues } from '../api';
 import type { Statement, Politician, Issue } from '../types';
@@ -41,6 +41,18 @@ function platformIcon(platform: string): React.ReactNode {
       </svg>
     );
   }
+  if (p === 'bluesky') {
+    return (
+      <svg className={baseClass} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 10.8c-1.087-2.114-4.046-6.053-6.798-7.995C2.566.944 1.561 1.266.902 1.565.139 1.908 0 3.08 0 3.768c0 .69.378 5.65.624 6.479.785 2.627 3.6 3.502 6.204 3.17-4.024.578-7.577 2.199-3.844 7.683 4.245 5.709 7.672-.927 9.016-5.27.344-1.108.508-1.627.508-1.188 0-.44.164.08.508 1.188 1.344 4.343 4.771 10.979 9.016 5.27 3.733-5.484.18-7.105-3.844-7.683 2.604.332 5.42-.543 6.204-3.17.246-.828.624-5.79.624-6.479 0-.688-.139-1.86-.902-2.203-.66-.299-1.664-.62-4.3 1.24C16.046 4.748 13.087 8.687 12 10.8z" />
+      </svg>
+    );
+  }
+  if (p === 'truth social') {
+    return (
+      <span className={`${baseClass} font-bold text-sm leading-4 text-center`}>T</span>
+    );
+  }
   // Generic link icon
   return (
     <svg className={baseClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -63,8 +75,11 @@ function snippetText(text: string, maxLen = 180): string {
   return text.slice(0, maxLen).trimEnd() + '...';
 }
 
+type SortOption = 'newest' | 'oldest' | 'politician-az';
+
 export default function TimelinePage() {
   const [statements, setStatements] = useState<Statement[]>([]);
+  const [totalResults, setTotalResults] = useState(0);
   const [politicians, setPoliticians] = useState<Politician[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,13 +88,14 @@ export default function TimelinePage() {
   const [search, setSearch] = useState('');
   const [selectedPolitician, setSelectedPolitician] = useState('');
   const [selectedIssue, setSelectedIssue] = useState('');
+  const [sortBy, setSortBy] = useState<SortOption>('newest');
 
   // Load filter options on mount
   useEffect(() => {
     Promise.all([fetchPoliticians(), fetchIssues()])
-      .then(([pols, iss]) => {
-        setPoliticians(pols);
-        setIssues(iss);
+      .then(([polsRes, issRes]) => {
+        setPoliticians(polsRes.items);
+        setIssues(issRes.items);
       })
       .catch(() => {
         // Non-critical: filters just won't be populated
@@ -95,12 +111,8 @@ export default function TimelinePage() {
       issue_id: selectedIssue || undefined,
     })
       .then((data) => {
-        const sorted = [...data].sort(
-          (a, b) =>
-            new Date(b.post_date ?? b.created_at).getTime() -
-            new Date(a.post_date ?? a.created_at).getTime(),
-        );
-        setStatements(sorted);
+        setStatements(data.items);
+        setTotalResults(data.total);
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to load statements');
@@ -119,12 +131,39 @@ export default function TimelinePage() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
+  // Client-side sorting
+  const sortedStatements = useMemo(() => {
+    const sorted = [...statements];
+    switch (sortBy) {
+      case 'newest':
+        sorted.sort(
+          (a, b) =>
+            new Date(b.post_date ?? b.created_at).getTime() -
+            new Date(a.post_date ?? a.created_at).getTime(),
+        );
+        break;
+      case 'oldest':
+        sorted.sort(
+          (a, b) =>
+            new Date(a.post_date ?? a.created_at).getTime() -
+            new Date(b.post_date ?? b.created_at).getTime(),
+        );
+        break;
+      case 'politician-az':
+        sorted.sort((a, b) =>
+          a.politician.name.localeCompare(b.politician.name),
+        );
+        break;
+    }
+    return sorted;
+  }, [statements, sortBy]);
+
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
       <h1 className="text-3xl font-bold text-[var(--color-text)] mb-6">Timeline</h1>
 
       {/* Search and filters */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-8">
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <div className="flex-1 relative">
           <svg
             className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-secondary)]"
@@ -169,6 +208,22 @@ export default function TimelinePage() {
         </select>
       </div>
 
+      {/* Sort dropdown + results count */}
+      <div className="flex items-center justify-between mb-8">
+        <p className="text-sm text-[var(--color-text-secondary)]">
+          {!loading && !error && `Showing ${sortedStatements.length} of ${totalResults} results`}
+        </p>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortOption)}
+          className="px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] transition"
+        >
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+          <option value="politician-az">Politician A-Z</option>
+        </select>
+      </div>
+
       {/* Loading */}
       {loading && (
         <div className="flex justify-center py-16">
@@ -190,7 +245,7 @@ export default function TimelinePage() {
       )}
 
       {/* Empty */}
-      {!loading && !error && statements.length === 0 && (
+      {!loading && !error && sortedStatements.length === 0 && (
         <div className="text-center py-16">
           <p className="text-[var(--color-text-secondary)] text-lg">No statements found.</p>
           {(search || selectedPolitician || selectedIssue) && (
@@ -202,13 +257,13 @@ export default function TimelinePage() {
       )}
 
       {/* Timeline feed */}
-      {!loading && !error && statements.length > 0 && (
+      {!loading && !error && sortedStatements.length > 0 && (
         <div className="relative">
           {/* Vertical line */}
           <div className="absolute left-4 top-0 bottom-0 w-px bg-[var(--color-border)]" />
 
           <div className="space-y-6">
-            {statements.map((stmt) => (
+            {sortedStatements.map((stmt) => (
               <div key={stmt.id} className="relative pl-10">
                 {/* Dot on timeline */}
                 <div className="absolute left-2.5 top-6 w-3 h-3 rounded-full bg-[var(--color-accent)] ring-4 ring-[var(--color-bg)]" />
@@ -224,9 +279,14 @@ export default function TimelinePage() {
                     >
                       {stmt.politician.party}
                     </span>
-                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[var(--color-badge-bg)] text-[var(--color-badge-text)]">
-                      {stmt.issue.name}
-                    </span>
+                    {stmt.issues.map((issue) => (
+                      <span
+                        key={issue.id}
+                        className="text-xs font-medium px-2 py-0.5 rounded-full bg-[var(--color-badge-bg)] text-[var(--color-badge-text)]"
+                      >
+                        {issue.name}
+                      </span>
+                    ))}
                     <span className="ml-auto flex items-center gap-1 text-[var(--color-text-secondary)]">
                       {platformIcon(stmt.post_platform)}
                       <span className="text-xs">{stmt.post_platform}</span>

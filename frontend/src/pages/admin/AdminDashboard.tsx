@@ -7,11 +7,18 @@ import {
   deletePolitician,
   deleteIssue,
   deleteStatement,
+  exportData,
+  importData,
 } from '../../api';
 import type { Politician, Issue, Statement } from '../../types';
+import { useAuth } from '../../AuthContext';
+import { useToast } from '../../Toast';
+import LoginPage from './LoginPage';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
+  const { isLoggedIn, logout } = useAuth();
+  const { toast } = useToast();
   const [politicians, setPoliticians] = useState<Politician[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [statements, setStatements] = useState<Statement[]>([]);
@@ -20,14 +27,14 @@ export default function AdminDashboard() {
 
   const loadData = useCallback(async () => {
     try {
-      const [pols, iss, stmts] = await Promise.all([
+      const [polsRes, issRes, stmtsRes] = await Promise.all([
         fetchPoliticians(),
         fetchIssues(),
         fetchStatements(),
       ]);
-      setPoliticians(pols);
-      setIssues(iss);
-      setStatements(stmts);
+      setPoliticians(polsRes.items);
+      setIssues(issRes.items);
+      setStatements(stmtsRes.items);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -37,26 +44,42 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (isLoggedIn) {
+      loadData();
+    }
+  }, [loadData, isLoggedIn]);
 
   async function handleDeletePolitician(id: number, name: string) {
-    if (!window.confirm(`Delete politician "${name}"? This cannot be undone.`)) return;
+    const stmtCount = statements.filter((s) => s.politician_id === id).length;
+    const message =
+      stmtCount > 0
+        ? `Delete politician "${name}"? This will also delete ${stmtCount} statement${stmtCount === 1 ? '' : 's'}. Are you sure?`
+        : `Delete politician "${name}"? This cannot be undone.`;
+    if (!window.confirm(message)) return;
     try {
       await deletePolitician(id);
+      toast(`Politician "${name}" deleted successfully`, 'success');
       await loadData();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete politician');
+      toast(err instanceof Error ? err.message : 'Failed to delete politician', 'error');
     }
   }
 
   async function handleDeleteIssue(id: number, name: string) {
-    if (!window.confirm(`Delete issue "${name}"? This cannot be undone.`)) return;
+    const stmtCount = statements.filter((s) =>
+      s.issues.some((iss) => iss.id === id),
+    ).length;
+    const message =
+      stmtCount > 0
+        ? `Delete issue "${name}"? ${stmtCount} statement${stmtCount === 1 ? '' : 's'} tagged with this issue will be affected. Are you sure?`
+        : `Delete issue "${name}"? This cannot be undone.`;
+    if (!window.confirm(message)) return;
     try {
       await deleteIssue(id);
+      toast(`Issue "${name}" deleted successfully`, 'success');
       await loadData();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete issue');
+      toast(err instanceof Error ? err.message : 'Failed to delete issue', 'error');
     }
   }
 
@@ -64,10 +87,65 @@ export default function AdminDashboard() {
     if (!window.confirm(`Delete statement "${title}"? This cannot be undone.`)) return;
     try {
       await deleteStatement(id);
+      toast(`Statement "${title}" deleted successfully`, 'success');
       await loadData();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete statement');
+      toast(err instanceof Error ? err.message : 'Failed to delete statement', 'error');
     }
+  }
+
+  async function handleExport() {
+    try {
+      const data = await exportData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `politician-tracker-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast('Data exported successfully', 'success');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to export data', 'error');
+    }
+  }
+
+  function handleImport() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        if (!data.politicians && !data.issues && !data.statements) {
+          toast('Invalid backup file format. Expected politicians, issues, and statements keys.', 'error');
+          return;
+        }
+        if (!window.confirm('Import data from backup? This will merge with existing data (duplicates are skipped).')) {
+          return;
+        }
+        const result = await importData(data);
+        toast(
+          `Import complete: ${result.imported.politicians} politicians, ${result.imported.issues} issues, ${result.imported.statements} statements, ${result.imported.sources} sources`,
+          'success',
+        );
+        await loadData();
+      } catch (err) {
+        toast(err instanceof Error ? err.message : 'Failed to import data', 'error');
+      }
+    };
+    input.click();
+  }
+
+  if (!isLoggedIn) {
+    return <LoginPage />;
   }
 
   if (loading) {
@@ -94,7 +172,29 @@ export default function AdminDashboard() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-      <h1 className="text-3xl font-bold text-[var(--color-text)] mb-8">Admin Dashboard</h1>
+      <div className="flex items-center justify-between mb-8">
+        <h1 className="text-3xl font-bold text-[var(--color-text)]">Admin Dashboard</h1>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleImport}
+            className="px-4 py-2 bg-[var(--color-bg-secondary)] text-[var(--color-text)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--color-border)] transition text-sm font-medium"
+          >
+            Import Backup
+          </button>
+          <button
+            onClick={handleExport}
+            className="px-4 py-2 bg-[var(--color-bg-secondary)] text-[var(--color-text)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--color-border)] transition text-sm font-medium"
+          >
+            Export Backup
+          </button>
+          <button
+            onClick={logout}
+            className="px-4 py-2 bg-[var(--color-danger)] text-white rounded-lg hover:opacity-90 transition text-sm font-medium"
+          >
+            Logout
+          </button>
+        </div>
+      </div>
 
       {/* Politicians Section */}
       <section className="mb-12">
@@ -245,7 +345,7 @@ export default function AdminDashboard() {
                 <tr className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
                   <th className="text-left px-4 py-3 font-medium text-[var(--color-text-secondary)]">Title</th>
                   <th className="text-left px-4 py-3 font-medium text-[var(--color-text-secondary)]">Politician</th>
-                  <th className="text-left px-4 py-3 font-medium text-[var(--color-text-secondary)]">Issue</th>
+                  <th className="text-left px-4 py-3 font-medium text-[var(--color-text-secondary)]">Issues</th>
                   <th className="text-left px-4 py-3 font-medium text-[var(--color-text-secondary)]">Date</th>
                   <th className="text-right px-4 py-3 font-medium text-[var(--color-text-secondary)]">Actions</th>
                 </tr>
@@ -267,7 +367,9 @@ export default function AdminDashboard() {
                       {stmt.politician?.name ?? '—'}
                     </td>
                     <td className="px-4 py-3 text-[var(--color-text-secondary)]">
-                      {stmt.issue?.name ?? '—'}
+                      {stmt.issues.length > 0
+                        ? stmt.issues.map((iss) => iss.name).join(', ')
+                        : '—'}
                     </td>
                     <td className="px-4 py-3 text-[var(--color-text-secondary)]">
                       {stmt.post_date

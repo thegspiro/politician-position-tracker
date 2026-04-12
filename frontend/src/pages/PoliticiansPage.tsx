@@ -17,7 +17,7 @@ export default function PoliticiansPage() {
 
   useEffect(() => {
     fetchPoliticians()
-      .then(setPoliticians)
+      .then((res) => setPoliticians(res.items))
       .catch((err) =>
         setError(err instanceof Error ? err.message : 'Failed to load politicians'),
       )

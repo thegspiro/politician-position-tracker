@@ -10,7 +10,7 @@ export default function IssuesPage() {
 
   useEffect(() => {
     fetchIssues()
-      .then(setIssues)
+      .then((res) => setIssues(res.items))
       .catch((err) =>
         setError(err instanceof Error ? err.message : 'Failed to load issues'),
       )

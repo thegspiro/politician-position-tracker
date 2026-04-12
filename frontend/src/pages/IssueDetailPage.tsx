@@ -121,6 +121,14 @@ export default function IssueDetailPage() {
               >
                 {stmt.politician.party}
               </span>
+              {stmt.issues.map((iss) => (
+                <span
+                  key={iss.id}
+                  className="text-xs font-medium px-2 py-0.5 rounded-full bg-[var(--color-badge-bg)] text-[var(--color-badge-text)]"
+                >
+                  {iss.name}
+                </span>
+              ))}
               <span className="text-xs text-[var(--color-text-secondary)] ml-auto">
                 {formatDate(stmt.post_date ?? stmt.created_at)}
               </span>

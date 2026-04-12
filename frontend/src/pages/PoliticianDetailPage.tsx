@@ -135,9 +135,14 @@ export default function PoliticianDetailPage() {
             className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-xl p-5 transition hover:border-[var(--color-accent)]"
           >
             <div className="flex flex-wrap items-center gap-2 mb-2">
-              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[var(--color-badge-bg)] text-[var(--color-badge-text)]">
-                {stmt.issue.name}
-              </span>
+              {stmt.issues.map((issue) => (
+                <span
+                  key={issue.id}
+                  className="text-xs font-medium px-2 py-0.5 rounded-full bg-[var(--color-badge-bg)] text-[var(--color-badge-text)]"
+                >
+                  {issue.name}
+                </span>
+              ))}
               <span className="text-xs text-[var(--color-text-secondary)] ml-auto">
                 {formatDate(stmt.post_date ?? stmt.created_at)}
               </span>

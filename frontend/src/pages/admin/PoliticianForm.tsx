@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { fetchPolitician, createPolitician, updatePolitician } from '../../api';
+import { useToast } from '../../Toast';
 
 const PARTIES = ['Democrat', 'Republican', 'Independent', 'Libertarian', 'Green', 'Other'];
 
@@ -19,6 +20,7 @@ export default function PoliticianForm() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const isEdit = Boolean(id);
+  const { toast } = useToast();
 
   const [name, setName] = useState('');
   const [party, setParty] = useState('');
@@ -78,6 +80,7 @@ export default function PoliticianForm() {
       } else {
         await createPolitician(data);
       }
+      toast('Politician saved successfully', 'success');
       navigate('/admin');
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Failed to save politician');

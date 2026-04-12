@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { fetchIssue, createIssue, updateIssue } from '../../api';
+import { useToast } from '../../Toast';
 
 export default function IssueForm() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const isEdit = Boolean(id);
+  const { toast } = useToast();
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -54,6 +56,7 @@ export default function IssueForm() {
       } else {
         await createIssue(data);
       }
+      toast('Issue saved successfully', 'success');
       navigate('/admin');
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Failed to save issue');
