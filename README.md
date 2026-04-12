@@ -97,6 +97,22 @@ The frontend dev server runs on `http://localhost:5173` and proxies API requests
 
 ## Unraid Installation
 
+### One-Line Terminal Install
+
+Open the Unraid terminal and run:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/thegspiro/politician-position-tracker/main/install-unraid.sh | bash
+```
+
+To customize the port or admin password:
+
+```bash
+PORT=9847 ADMIN_PASSWORD=mysecurepassword curl -sSL https://raw.githubusercontent.com/thegspiro/politician-position-tracker/main/install-unraid.sh | bash
+```
+
+This clones the repo, builds the Docker image locally, creates the data directory, and starts the container.
+
 ### Via Community Applications
 
 1. In the Unraid web UI, go to **Apps** (Community Applications)
