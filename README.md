@@ -12,6 +12,9 @@ Built as a single-container Docker application with a FastAPI backend serving a 
 - **Politician Profiles** -- View all statements from a specific politician with photo, party, office, and state
 - **Issue Tracking** -- Tag statements with multiple issues and browse all statements for a given issue
 - **Social Media Embeds** -- Native embeds for X/Twitter, YouTube, and Bluesky posts; styled blockquotes for Truth Social
+- **Primary Source Embeds** -- Attach primary sources with publisher, date, verbatim excerpt and locator (page, section or timestamp); documents, video and audio embed inline behind a click-to-load control
+- **Inline Citations** -- Cite a source from the analysis body with `[^1]`; the marker links to that source's card
+- **Link Rot Protection** -- Record an archive URL, archive date and retrieval date alongside every source
 - **Sourced Analysis** -- Write analysis with Markdown formatting and attach separate citation lists for the original post and your analysis
 - **Screenshot Backup** -- Upload screenshots of posts as a backup in case the original is deleted
 - **Admin Panel** -- Password-protected admin dashboard for managing all data with full CRUD operations
@@ -115,6 +118,47 @@ cd backend
 pip install -r requirements-dev.txt
 python -m pytest tests/ -q
 ```
+
+**Frontend tests:**
+
+```bash
+cd frontend
+npm test
+```
+
+---
+
+## Working With Primary Sources
+
+Each statement carries two source lists: **Post Sources** (primary sources for
+the original post) and **Analysis Sources** (primary sources supporting your
+analysis). Beyond a title and URL, each source records:
+
+| Field | Purpose |
+|---|---|
+| Media type | `webpage`, `document`, `video`, `audio`, `article` or `dataset`. Selects how the source is embedded |
+| Publisher / Published date | Provenance, e.g. "Congress.gov", 14 Jan 2026 |
+| Excerpt | The verbatim passage being relied on, shown as a pull quote |
+| Locator | Where the excerpt lives: `p. 14`, `sec. 203`, `01:23:45` |
+| Archive URL / Archived on | A snapshot to fall back on when the original link rots |
+| Retrieved on | When the original was last confirmed to say what is quoted |
+
+**Embedding.** A `video` source pointing at YouTube embeds inline, and a
+timestamp locator such as `01:23:45` starts playback at that point. A `document`
+source whose URL ends in `.pdf` offers an inline preview. An `audio` source
+pointing directly at an audio file gets a player. Third-party frames only load
+when the reader clicks, so the page does not call out to every embedded host on
+load, and a publisher that refuses framing degrades to a plain link.
+
+**Citations.** Write `[^1]` in the analysis to cite source `[1]`. Numbering runs
+across both lists combined -- post sources first, then analysis sources -- and
+each source card in the admin form shows the number to use. Rearrange sources
+with the arrow buttons; the numbers follow. Each marker renders as a link to
+that source's card.
+
+**Stable links.** Every source has a `uid` and its card is addressable as
+`#source-<uid>`. Editing a statement updates sources in place rather than
+recreating them, so those links survive edits.
 
 ---
 

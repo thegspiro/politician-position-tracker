@@ -116,13 +116,31 @@ Tables are auto-created on application startup via `Base.metadata.create_all(bin
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | INTEGER | PRIMARY KEY, AUTOINCREMENT | Unique identifier |
+| `uid` | VARCHAR(12) | NOT NULL, UNIQUE | Stable public identifier, preserved across statement edits |
 | `statement_id` | INTEGER | FOREIGN KEY -> statements.id, NOT NULL | Parent statement |
 | `source_type` | VARCHAR(20) | NOT NULL, DEFAULT "analysis" | Either `"post"` or `"analysis"` |
 | `title` | VARCHAR(500) | NOT NULL | Source title/label |
-| `url` | VARCHAR(1000) | NOT NULL | URL to the source |
-| `description` | TEXT | NULLABLE | Brief description of the source |
+| `url` | VARCHAR(1000) | NOT NULL | URL to the source (http/https only) |
+| `description` | TEXT | NULLABLE | Brief editorial note about the source |
+| `media_type` | VARCHAR(20) | NOT NULL, DEFAULT "webpage" | One of `webpage`, `document`, `video`, `audio`, `article`, `dataset`. Selects the embed renderer |
+| `publisher` | VARCHAR(200) | NULLABLE | Issuing body, e.g. "Congress.gov", "C-SPAN", "FEC" |
+| `published_date` | DATETIME | NULLABLE | When the source was published |
+| `excerpt` | TEXT | NULLABLE | Verbatim passage being relied on |
+| `locator` | VARCHAR(100) | NULLABLE | Where the excerpt lives: "p. 14", "sec. 203", "01:23:45" |
+| `archive_url` | VARCHAR(1000) | NULLABLE | Snapshot used when the original rots (http/https only) |
+| `archived_at` | DATETIME | NULLABLE | When the snapshot was taken |
+| `retrieved_at` | DATETIME | NULLABLE | When the original was last confirmed |
+| `sort_order` | INTEGER | NOT NULL, DEFAULT 0 | Display order; also the citation marker number |
 
 **Relationships**: Belongs to one `statement`.
+
+**Why `uid` exists**: saving a statement rewrites its source rows, so `id` is not
+stable across edits. `uid` is generated once and preserved, so citation markers
+and `#source-<uid>` fragment links keep working after an edit.
+
+**Citations**: a `[^1]` marker in a statement's `analysis` refers to the source
+numbered `[1]` in the rendered source list, which is ordered by `sort_order`.
+Markers are rendered as links to that source's card.
 
 #### `statement_issues` (Association Table)
 

@@ -4,8 +4,22 @@ import type {
   Issue,
   IssueDetail,
   Statement,
+  SourcePayload,
   PaginatedResponse,
 } from './types';
+
+interface StatementPayload {
+  politician_id: number;
+  issue_ids: number[];
+  title: string;
+  analysis: string;
+  post_url: string;
+  post_platform: string;
+  post_content?: string | null;
+  screenshot_url?: string | null;
+  post_date?: string | null;
+  sources?: SourcePayload[];
+}
 
 const API_BASE = '/api';
 
@@ -176,18 +190,7 @@ export function fetchStatement(id: number | string): Promise<Statement> {
   return request<Statement>(`/statements/${id}`);
 }
 
-export function createStatement(data: {
-  politician_id: number;
-  issue_ids: number[];
-  title: string;
-  analysis: string;
-  post_url: string;
-  post_platform: string;
-  post_content?: string | null;
-  screenshot_url?: string | null;
-  post_date?: string | null;
-  sources?: { source_type: string; title: string; url: string; description: string }[];
-}): Promise<Statement> {
+export function createStatement(data: StatementPayload): Promise<Statement> {
   return request<Statement>('/statements', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -196,18 +199,7 @@ export function createStatement(data: {
 
 export function updateStatement(
   id: number | string,
-  data: {
-    politician_id: number;
-    issue_ids: number[];
-    title: string;
-    analysis: string;
-    post_url: string;
-    post_platform: string;
-    post_content?: string | null;
-    screenshot_url?: string | null;
-    post_date?: string | null;
-    sources?: { source_type: string; title: string; url: string; description: string }[];
-  },
+  data: StatementPayload,
 ): Promise<Statement> {
   return request<Statement>(`/statements/${id}`, {
     method: 'PUT',

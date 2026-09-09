@@ -8,13 +8,44 @@ import {
   updateStatement,
   uploadFile,
 } from '../../api';
-import type { Politician, Issue, SourceInput } from '../../types';
+import type { Politician, Issue, Source, SourceInput } from '../../types';
 import { useToast } from '../../Toast';
+import SourceListEditor from '../../components/SourceListEditor';
 
 const PLATFORMS = ['X', 'Bluesky', 'Truth Social', 'YouTube'];
 
-function emptySource(type: 'post' | 'analysis'): SourceInput {
-  return { source_type: type, title: '', url: '', description: '' };
+/** Date inputs use YYYY-MM-DD; the API returns full ISO timestamps. */
+function toDateInput(value: string | null | undefined): string {
+  return value ? value.slice(0, 10) : '';
+}
+
+/** Blank date and text inputs are sent as null, not as empty strings. */
+function orNull(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+/**
+ * Map an API source onto the form shape, keeping its uid so that saving
+ * updates the existing row in place instead of replacing it. Losing the uid
+ * would break any citation marker pointing at the source.
+ */
+function toSourceInput(source: Source): SourceInput {
+  return {
+    uid: source.uid,
+    source_type: source.source_type,
+    title: source.title,
+    url: source.url,
+    description: source.description ?? '',
+    media_type: source.media_type,
+    publisher: source.publisher ?? '',
+    published_date: toDateInput(source.published_date),
+    excerpt: source.excerpt ?? '',
+    locator: source.locator ?? '',
+    archive_url: source.archive_url ?? '',
+    archived_at: toDateInput(source.archived_at),
+    retrieved_at: toDateInput(source.retrieved_at),
+  };
 }
 
 export default function StatementForm() {
@@ -68,25 +99,14 @@ export default function StatementForm() {
           setPostDate(stmt.post_date ? stmt.post_date.slice(0, 10) : '');
           setAnalysis(stmt.analysis);
           if (stmt.sources && stmt.sources.length > 0) {
+            const ordered = [...stmt.sources].sort(
+              (a, b) => a.sort_order - b.sort_order || a.id - b.id,
+            );
             setPostSources(
-              stmt.sources
-                .filter((s) => s.source_type === 'post')
-                .map((s) => ({
-                  source_type: 'post' as const,
-                  title: s.title,
-                  url: s.url,
-                  description: s.description ?? '',
-                })),
+              ordered.filter((s) => s.source_type === 'post').map(toSourceInput),
             );
             setAnalysisSources(
-              stmt.sources
-                .filter((s) => s.source_type === 'analysis')
-                .map((s) => ({
-                  source_type: 'analysis' as const,
-                  title: s.title,
-                  url: s.url,
-                  description: s.description ?? '',
-                })),
+              ordered.filter((s) => s.source_type === 'analysis').map(toSourceInput),
             );
           }
         }
@@ -117,27 +137,6 @@ export default function StatementForm() {
     return Object.keys(newErrors).length === 0;
   }
 
-  function handleSourceChange(
-    setter: React.Dispatch<React.SetStateAction<SourceInput[]>>,
-    index: number,
-    field: 'title' | 'url' | 'description',
-    value: string,
-  ) {
-    setter((prev) => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], [field]: value };
-      return updated;
-    });
-  }
-
-  function addSource(setter: React.Dispatch<React.SetStateAction<SourceInput[]>>, type: 'post' | 'analysis') {
-    setter((prev) => [...prev, emptySource(type)]);
-  }
-
-  function removeSource(setter: React.Dispatch<React.SetStateAction<SourceInput[]>>, index: number) {
-    setter((prev) => prev.filter((_, i) => i !== index));
-  }
-
   async function handleUpload() {
     const file = fileInputRef.current?.files?.[0];
     if (!file) return;
@@ -162,9 +161,23 @@ export default function StatementForm() {
 
     setLoading(true);
 
-    const allSources = [...postSources, ...analysisSources].filter(
-      (s) => s.title.trim() && s.url.trim(),
-    );
+    const allSources = [...postSources, ...analysisSources]
+      .filter((s) => s.title.trim() && s.url.trim())
+      .map((s) => ({
+        uid: s.uid,
+        source_type: s.source_type,
+        title: s.title.trim(),
+        url: s.url.trim(),
+        description: orNull(s.description),
+        media_type: s.media_type,
+        publisher: orNull(s.publisher),
+        published_date: orNull(s.published_date),
+        excerpt: orNull(s.excerpt),
+        locator: orNull(s.locator),
+        archive_url: orNull(s.archive_url),
+        archived_at: orNull(s.archived_at),
+        retrieved_at: orNull(s.retrieved_at),
+      }));
 
     const data = {
       politician_id: Number(politicianId),
@@ -176,7 +189,7 @@ export default function StatementForm() {
       screenshot_url: screenshotUrl.trim() || null,
       post_date: postDate || null,
       analysis: analysis.trim(),
-      sources: allSources.length > 0 ? allSources : undefined,
+      sources: allSources,
     };
 
     try {
@@ -404,106 +417,36 @@ export default function StatementForm() {
             className={`${inputClass} resize-y`}
             placeholder="Provide analysis of the statement and its significance"
           />
+          <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+            Cite a source with a marker like <code>[^1]</code>, using the number
+            shown on its card below. Markers link to that source.
+          </p>
           {errors.analysis && (
             <p className="mt-1 text-sm text-[var(--color-danger)]">{errors.analysis}</p>
           )}
         </div>
 
-        {/* Post Sources */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="block text-sm font-medium text-[var(--color-text)]">
-              Post Sources
-              <span className="block text-xs font-normal text-[var(--color-text-secondary)]">Citations for the original post</span>
-            </label>
-            <button
-              type="button"
-              onClick={() => addSource(setPostSources, 'post')}
-              className="px-3 py-1 text-sm bg-[var(--color-accent)] text-white rounded-lg hover:bg-[var(--color-accent-hover)] transition font-medium"
-            >
-              + Add Post Source
-            </button>
-          </div>
+        <SourceListEditor
+          legend="Post Sources"
+          blurb="Primary sources for the original post"
+          addLabel="+ Add Post Source"
+          emptyLabel="No post sources added yet."
+          sourceType="post"
+          sources={postSources}
+          onChange={setPostSources}
+          numberOffset={0}
+        />
 
-          {postSources.length === 0 && (
-            <p className="text-sm text-[var(--color-text-secondary)] italic mb-2">
-              No post sources added yet.
-            </p>
-          )}
-
-          <div className="space-y-4">
-            {postSources.map((source, index) => (
-              <div
-                key={index}
-                className="border border-[var(--color-border)] rounded-lg p-4 bg-[var(--color-bg)] space-y-3"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-[var(--color-text-secondary)]">
-                    Post Source {index + 1}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeSource(setPostSources, index)}
-                    className="px-3 py-1 text-sm bg-[var(--color-danger)] text-white rounded-lg hover:bg-[var(--color-danger-hover)] transition font-medium"
-                  >
-                    Remove
-                  </button>
-                </div>
-                <input type="text" placeholder="Source title" value={source.title} onChange={(e) => handleSourceChange(setPostSources, index, 'title', e.target.value)} className={inputClass} />
-                <input type="url" placeholder="https://..." value={source.url} onChange={(e) => handleSourceChange(setPostSources, index, 'url', e.target.value)} className={inputClass} />
-                <input type="text" placeholder="Brief description (optional)" value={source.description} onChange={(e) => handleSourceChange(setPostSources, index, 'description', e.target.value)} className={inputClass} />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Analysis Sources */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="block text-sm font-medium text-[var(--color-text)]">
-              Analysis Sources
-              <span className="block text-xs font-normal text-[var(--color-text-secondary)]">Citations supporting your analysis/response</span>
-            </label>
-            <button
-              type="button"
-              onClick={() => addSource(setAnalysisSources, 'analysis')}
-              className="px-3 py-1 text-sm bg-[var(--color-accent)] text-white rounded-lg hover:bg-[var(--color-accent-hover)] transition font-medium"
-            >
-              + Add Analysis Source
-            </button>
-          </div>
-
-          {analysisSources.length === 0 && (
-            <p className="text-sm text-[var(--color-text-secondary)] italic mb-2">
-              No analysis sources added yet.
-            </p>
-          )}
-
-          <div className="space-y-4">
-            {analysisSources.map((source, index) => (
-              <div
-                key={index}
-                className="border border-[var(--color-border)] rounded-lg p-4 bg-[var(--color-bg)] space-y-3"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-[var(--color-text-secondary)]">
-                    Analysis Source {index + 1}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeSource(setAnalysisSources, index)}
-                    className="px-3 py-1 text-sm bg-[var(--color-danger)] text-white rounded-lg hover:bg-[var(--color-danger-hover)] transition font-medium"
-                  >
-                    Remove
-                  </button>
-                </div>
-                <input type="text" placeholder="Source title" value={source.title} onChange={(e) => handleSourceChange(setAnalysisSources, index, 'title', e.target.value)} className={inputClass} />
-                <input type="url" placeholder="https://..." value={source.url} onChange={(e) => handleSourceChange(setAnalysisSources, index, 'url', e.target.value)} className={inputClass} />
-                <input type="text" placeholder="Brief description (optional)" value={source.description} onChange={(e) => handleSourceChange(setAnalysisSources, index, 'description', e.target.value)} className={inputClass} />
-              </div>
-            ))}
-          </div>
-        </div>
+        <SourceListEditor
+          legend="Analysis Sources"
+          blurb="Primary sources supporting your analysis"
+          addLabel="+ Add Analysis Source"
+          emptyLabel="No analysis sources added yet."
+          sourceType="analysis"
+          sources={analysisSources}
+          onChange={setAnalysisSources}
+          numberOffset={postSources.length}
+        />
 
         {/* Actions */}
         <div className="flex items-center gap-3 pt-2">
