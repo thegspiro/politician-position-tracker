@@ -20,6 +20,15 @@ function source(overrides: Partial<Source> = {}): Source {
     archived_at: null,
     retrieved_at: null,
     sort_order: 0,
+    authors: [],
+    container_title: null,
+    edition: null,
+    document_type: null,
+    bill_number: null,
+    congress_number: null,
+    congress_session: null,
+    committee: null,
+    report_number: null,
     ...overrides,
   };
 }

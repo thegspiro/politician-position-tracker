@@ -42,6 +42,62 @@ export const MEDIA_TYPE_LABELS: Record<MediaType, string> = {
   dataset: 'Dataset',
 };
 
+export type CitationStyle = 'notes-bibliography' | 'author-date';
+
+export const CITATION_STYLE_LABELS: Record<CitationStyle, string> = {
+  'notes-bibliography': 'Notes-Bibliography',
+  'author-date': 'Author-Date',
+};
+
+/** A personal name, or a corporate one via `literal`. */
+export interface Author {
+  given?: string | null;
+  family?: string | null;
+  literal?: string | null;
+}
+
+/** A run of citation text. Italics are structural, never markup. */
+export interface CitationSpan {
+  text: string;
+  italic: boolean;
+}
+
+export interface CitationForm {
+  /** Plain text, for copying. */
+  text: string;
+  /** The same content as renderable runs. */
+  spans: CitationSpan[];
+}
+
+export interface CitationSet {
+  note: CitationForm;
+  bibliography: CitationForm;
+  author_date_citation: CitationForm;
+  author_date_reference: CitationForm;
+}
+
+export const DOCUMENT_TYPES = [
+  'bill',
+  'statute',
+  'hearing',
+  'committee_report',
+  'court_opinion',
+  'executive_order',
+  'other',
+] as const;
+
+export type DocumentType = (typeof DOCUMENT_TYPES)[number];
+
+export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
+  bill: 'Bill',
+  statute: 'Statute',
+  hearing: 'Hearing',
+  committee_report: 'Committee report',
+  court_opinion: 'Court opinion',
+  executive_order: 'Executive order',
+  other: 'Other',
+};
+
 export interface Source {
   id: number;
   /** Stable public identifier. Survives statement edits, so citations and
@@ -62,6 +118,17 @@ export interface Source {
   archived_at: string | null;
   retrieved_at: string | null;
   sort_order: number;
+  authors: Author[];
+  container_title: string | null;
+  edition: string | null;
+  document_type: DocumentType | null;
+  bill_number: string | null;
+  congress_number: number | null;
+  congress_session: string | null;
+  committee: string | null;
+  report_number: string | null;
+  /** Rendered server-side, so exports cannot drift from what is displayed. */
+  citations?: CitationSet;
 }
 
 export interface SourceInput {
@@ -79,6 +146,15 @@ export interface SourceInput {
   archive_url: string;
   archived_at: string;
   retrieved_at: string;
+  authors: Author[];
+  container_title: string;
+  edition: string;
+  document_type: DocumentType | '';
+  bill_number: string;
+  congress_number: string;
+  congress_session: string;
+  committee: string;
+  report_number: string;
 }
 
 /** The shape sent to the API when creating or updating a statement's sources. */
@@ -96,6 +172,28 @@ export interface SourcePayload {
   archive_url: string | null;
   archived_at: string | null;
   retrieved_at: string | null;
+  authors: Author[];
+  container_title: string | null;
+  edition: string | null;
+  document_type: DocumentType | null;
+  bill_number: string | null;
+  congress_number: number | null;
+  congress_session: string | null;
+  committee: string | null;
+  report_number: string | null;
+}
+
+/** Response of GET /api/statements/:id/citations. */
+export interface StatementCitations {
+  default_style: CitationStyle;
+  site_name: string;
+  sources: (CitationSet & {
+    uid: string;
+    source_type: 'post' | 'analysis';
+    sort_order: number;
+  })[];
+  post: CitationSet;
+  page: CitationSet;
 }
 
 export interface Statement {

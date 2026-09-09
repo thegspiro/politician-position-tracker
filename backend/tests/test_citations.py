@@ -736,3 +736,44 @@ def test_invalid_author_shapes_are_rejected(client, auth, authors):
         },
     )
     assert response.status_code == 422
+
+
+# --- Shortened titles ---------------------------------------------------
+
+
+def test_parenthetical_shortens_a_long_title_standing_in_for_an_author():
+    data = CitationInput(
+        title="Fair Housing Improvement and Tenant Protection Act of 2026",
+        published_date=datetime(2026, 1, 1),
+        document_type="bill",
+        media_type="document",
+    )
+    assert parenthetical(data) == "(Fair Housing Improvement and 2026)"
+
+
+def test_shortened_titles_drop_a_leading_article():
+    assert citations.shorten_title("The Fair Housing Improvement Act of 2026") == (
+        "Fair Housing Improvement Act"
+    )
+
+
+def test_a_short_title_is_left_alone():
+    assert citations.shorten_title("Housing Report") == "Housing Report"
+
+
+def test_shortened_titles_keep_the_style_of_the_full_title():
+    """A standalone work stays italic when shortened; a web page keeps quotes."""
+    document = CitationInput(
+        title="A Very Long Standalone Report Title Here",
+        media_type="document",
+        published_date=datetime(2026, 1, 1),
+    )
+    spans = spans_to_dicts(author_date_citation_spans(document))
+    assert any(span["italic"] for span in spans)
+
+    webpage = CitationInput(
+        title="A Very Long Web Page Title Here",
+        media_type="webpage",
+        published_date=datetime(2026, 1, 1),
+    )
+    assert '"' in parenthetical(webpage)

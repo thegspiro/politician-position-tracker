@@ -38,6 +38,14 @@ NOTE_AUTHOR_LIMIT = 3
 BIBLIOGRAPHY_AUTHOR_LIMIT = 10
 BIBLIOGRAPHY_AUTHOR_TRUNCATED_COUNT = 7
 
+# Words kept when a title stands in for an absent author in a parenthetical.
+# Chicago asks for a shortened title there, and an unshortened one reads badly
+# next to the year: "(Fair Housing Improvement Act of 2026 2026)".
+SHORT_TITLE_WORDS = 4
+
+# Words skipped when they open a title being shortened.
+_LEADING_ARTICLES = ("a", "an", "the")
+
 
 @dataclass(frozen=True)
 class Span:
@@ -209,6 +217,14 @@ def _ordinal(number: int) -> str:
     else:
         suffix = {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
     return f"{number}{suffix}"
+
+
+def shorten_title(title: str) -> str:
+    """Chicago's shortened title: the first few distinctive words, no ellipsis."""
+    words = title.split()
+    if words and words[0].lower() in _LEADING_ARTICLES:
+        words = words[1:]
+    return " ".join(words[:SHORT_TITLE_WORDS])
 
 
 def _should_show_access_date(data: CitationInput) -> bool:
@@ -418,9 +434,20 @@ def author_date_citation_spans(
     year = format_year(data.published_date)
 
     if not name:
-        # With no author, Chicago falls back to the title.
+        # With no author, Chicago falls back to a shortened form of the title.
+        shortened = shorten_title(data.title)
         inner: list[Span] = []
-        inner.extend(_title_spans(data, trailing=" "))
+        if shortened:
+            inner.extend(
+                _title_spans(
+                    CitationInput(
+                        title=shortened,
+                        media_type=data.media_type,
+                        document_type=data.document_type,
+                    ),
+                    trailing=" ",
+                )
+            )
         inner.append(Span(year))
     else:
         inner = [Span(f"{name} {year}")]

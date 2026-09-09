@@ -13,6 +13,8 @@ Built as a single-container Docker application with a FastAPI backend serving a 
 - **Issue Tracking** -- Tag statements with multiple issues and browse all statements for a given issue
 - **Social Media Embeds** -- Native embeds for X/Twitter, YouTube, and Bluesky posts; styled blockquotes for Truth Social
 - **Primary Source Embeds** -- Attach primary sources with publisher, date, verbatim excerpt and locator (page, section or timestamp); documents, video and audio embed inline behind a click-to-load control
+- **Chicago Citations** -- Every source, the tracked post, and the page itself formatted to the Chicago Manual of Style (18th ed.), in both Notes-Bibliography and Author-Date, with a per-reader style toggle
+- **Bibliography and Export** -- A reference list on every statement, copy-to-clipboard per entry, and BibTeX / CSL-JSON export for Zotero and pandoc
 - **Inline Citations** -- Cite a source from the analysis body with `[^1]`; the marker links to that source's card
 - **Link Rot Protection** -- Record an archive URL, archive date and retrieval date alongside every source
 - **Sourced Analysis** -- Write analysis with Markdown formatting and attach separate citation lists for the original post and your analysis
@@ -167,6 +169,64 @@ recreating them, so those links survive edits.
 
 ---
 
+## Citations
+
+Sources are formatted to the **Chicago Manual of Style, 18th edition**, in both
+of Chicago's systems:
+
+| System | At the point of citation | In the list |
+|---|---|---|
+| Notes-Bibliography (default) | A note: `Maria Reyes, "Senator Doe Reverses Course," New York Times, January 14, 2026, https://...` | Bibliography, lead author inverted |
+| Author-Date | A parenthetical: `(Reyes 2026, 14)` | References, year moved forward |
+
+`CITATION_STYLE` sets the site default; readers can switch with the toggle on
+any statement page, and their choice is remembered.
+
+### What each field feeds
+
+| Field | Effect on the citation |
+|---|---|
+| Authors | Structured given/family names, or an organisation. Chicago inverts only the lead author in a bibliography, and never inverts an organisation |
+| Container title | The publication the source sits in. Italicised for a periodical, roman for a plain website name |
+| Publisher, edition | Included when they differ from the container |
+| Published date | The date in the citation and the year in author-date forms |
+| Retrieved on | Shown as an access date **only when the source has no publication date**, per the 18th edition |
+| Locator | The page, section or timestamp: `p. 14`, `sec. 203`, `01:23:45` |
+| Document type | Selects Chicago's public-document form for bills, hearings, committee reports, court opinions and executive orders |
+
+A source with only a title and URL still cites correctly; the extra fields add
+precision rather than being required.
+
+### The post and the page
+
+The tracked social media post is cited in Chicago's social-media form, with the
+`@handle` recovered from the post URL for X, Bluesky and Truth Social. Each
+statement page also carries a **Cite this page** block for the tracker entry
+itself, using `SITE_NAME` and the page's own URL.
+
+### Export
+
+Every statement offers its whole bibliography as BibTeX or CSL-JSON:
+
+```
+GET /api/statements/{id}/citations       # all forms, as JSON
+GET /api/statements/{id}/citations.bib   # BibTeX
+GET /api/statements/{id}/citations.json  # CSL-JSON, for Zotero and pandoc
+```
+
+Citations are rendered on the server, so an exported file and the page always
+agree.
+
+### Scope
+
+This covers the source types the tracker records. Chicago defers to Bluebook
+conventions for much legal material and carries far more special cases than are
+implemented, so an unusual source may need an editor's hand. Where the 18th
+edition differs from the 17th in a way that changes output -- access dates,
+most notably -- `backend/app/citations.py` notes it at the point it applies.
+
+---
+
 ## Database Migrations
 
 The schema is owned by [Alembic](https://alembic.sqlalchemy.org/). The container
@@ -252,6 +312,9 @@ By default, data is stored at `/mnt/user/appdata/politician-tracker` on the Unra
 | `MAX_UPLOAD_MB` | `5` | No | Largest accepted upload. |
 | `UPLOAD_DIR` | `/app/data/uploads` | No | Where uploads are stored. Set this when running outside Docker. |
 | `CONTENT_SECURITY_POLICY` | *(built-in)* | No | Overrides the default CSP. Set to an empty string to disable it while diagnosing a blocked embed. |
+| `SITE_NAME` | `Politician Tracker` | No | Site name used in the "cite this page" citation. |
+| `SITE_URL` | *(derived from the request)* | No | Public base URL, used in the "cite this page" citation. Set this when behind a reverse proxy that does not forward the original host. |
+| `CITATION_STYLE` | `notes-bibliography` | No | Default Chicago system: `notes-bibliography` or `author-date`. Readers can override it per browser. |
 | `CORS_ORIGINS` | *(empty)* | No | Comma-separated origins allowed to make credentialed API requests. Leave empty in production; the Vite dev server proxies `/api`, so local development does not need it either. |
 | `ALLOW_INSECURE_DEFAULTS` | *(unset)* | No | Set to `1` to start with a default or missing password/secret. **Never set this on a reachable host.** |
 

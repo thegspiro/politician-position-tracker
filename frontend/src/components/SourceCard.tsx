@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import type { Source } from '../types';
+import type { CitationStyle, Source } from '../types';
 import { MEDIA_TYPE_LABELS } from '../types';
+import { CitationText, CopyButton } from './CitationText';
+import { inTextForm } from '../lib/citations';
 import {
   getYouTubeVideoId,
   hostLabel,
@@ -124,10 +126,12 @@ function SourceEmbed({ source }: { source: Source }) {
 export default function SourceCard({
   source,
   index,
+  citationStyle = 'notes-bibliography',
 }: {
   source: Source;
   /** 1-based position, used as the citation marker number. */
   index: number;
+  citationStyle?: CitationStyle;
 }) {
   const published = formatDate(source.published_date);
   const archived = formatDate(source.archived_at);
@@ -196,6 +200,18 @@ export default function SourceCard({
       )}
 
       <SourceEmbed source={source} />
+
+      {/* The formatted citation, so a reader can quote this source directly. */}
+      {source.citations && (
+        <div className="mt-3 pt-3 border-t border-[var(--color-border)]">
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
+              <CitationText form={inTextForm(source.citations, citationStyle)} />
+            </p>
+            <CopyButton value={inTextForm(source.citations, citationStyle).text} />
+          </div>
+        </div>
+      )}
 
       {/* Provenance footer */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-3 pt-3 border-t border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">

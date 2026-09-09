@@ -131,6 +131,15 @@ Tables are auto-created on application startup via `Base.metadata.create_all(bin
 | `archived_at` | DATETIME | NULLABLE | When the snapshot was taken |
 | `retrieved_at` | DATETIME | NULLABLE | When the original was last confirmed |
 | `sort_order` | INTEGER | NOT NULL, DEFAULT 0 | Display order; also the citation marker number |
+| `authors` | JSON | NULLABLE | Ordered list of `{given, family}` or `{literal}` objects. Nullable rather than defaulted because MySQL before 8.0.13 rejects DEFAULT on a JSON column; readers treat NULL as an empty list |
+| `container_title` | VARCHAR(300) | NULLABLE | The publication the source sits in. Italicised for periodicals, roman for plain website names |
+| `edition` | VARCHAR(100) | NULLABLE | Edition statement |
+| `document_type` | VARCHAR(40) | NULLABLE | One of `bill`, `statute`, `hearing`, `committee_report`, `court_opinion`, `executive_order`, `other`. Selects Chicago's public-document form |
+| `bill_number` | VARCHAR(50) | NULLABLE | e.g. "H.R. 1234" |
+| `congress_number` | INTEGER | NULLABLE | e.g. 118 |
+| `congress_session` | VARCHAR(20) | NULLABLE | e.g. "2nd" |
+| `committee` | VARCHAR(300) | NULLABLE | Committee holding a hearing |
+| `report_number` | VARCHAR(50) | NULLABLE | e.g. "H.R. Rep. No. 118-123" |
 
 **Relationships**: Belongs to one `statement`.
 
@@ -719,6 +728,9 @@ The theme is managed by `ThemeContext.tsx`:
 | `UPLOAD_DIR` | `/app/data/uploads` | No | `backend/app/main.py` | Upload storage directory. |
 | `CONTENT_SECURITY_POLICY` | *(built-in)* | No | `backend/app/main.py` | Overrides the CSP; empty string disables it. |
 | `CORS_ORIGINS` | *(empty)* | No | `backend/app/main.py` | Comma-separated allowed origins. Off by default. |
+| `SITE_NAME` | `Politician Tracker` | No | `backend/app/settings.py` | Site name used in the "cite this page" citation. |
+| `SITE_URL` | *(from request)* | No | `backend/app/routers/statements.py` | Public base URL for the "cite this page" citation. |
+| `CITATION_STYLE` | `notes-bibliography` | No | `backend/app/settings.py` | Default Chicago system. An unrecognised value falls back to the default rather than failing the boot. |
 | `ALLOW_INSECURE_DEFAULTS` | *(unset)* | No | `backend/app/auth.py` | Permits startup without real credentials. Never set on a reachable host. |
 
 ### Notes on Defaults

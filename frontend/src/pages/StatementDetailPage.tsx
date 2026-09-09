@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { fetchStatement } from '../api';
 import AnalysisMarkdown from '../components/AnalysisMarkdown';
+import BibliographySection from '../components/BibliographySection';
 import SourceCard from '../components/SourceCard';
 import { getYouTubeVideoId } from '../lib/embeds';
-import type { Source, Statement } from '../types';
+import type { CitationStyle, Source, Statement } from '../types';
 
 function partyBadgeClass(party: string): string {
   const p = party.toLowerCase();
@@ -286,11 +287,13 @@ function SourceSection({
   blurb,
   sources,
   numberOf,
+  citationStyle,
 }: {
   heading: string;
   blurb: string;
   sources: Source[];
   numberOf: (source: Source) => number;
+  citationStyle: CitationStyle;
 }) {
   if (sources.length === 0) return null;
 
@@ -300,7 +303,12 @@ function SourceSection({
       <p className="text-sm text-[var(--color-text-secondary)] mb-3">{blurb}</p>
       <div className="space-y-3">
         {sources.map((source) => (
-          <SourceCard key={source.uid} source={source} index={numberOf(source)} />
+          <SourceCard
+            key={source.uid}
+            source={source}
+            index={numberOf(source)}
+            citationStyle={citationStyle}
+          />
         ))}
       </div>
     </div>
@@ -312,6 +320,9 @@ export default function StatementDetailPage() {
   const [statement, setStatement] = useState<Statement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Shared with the source cards so a card's citation and the reference list
+  // never show different styles at the same time.
+  const [citationStyle, setCitationStyle] = useState<CitationStyle | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -354,6 +365,9 @@ export default function StatementDetailPage() {
     (a, b) => a.sort_order - b.sort_order || a.id - b.id,
   );
   const numberOf = (source: Source) => sortedSources.indexOf(source) + 1;
+  // Until the citation payload reports the site default, notes form is assumed;
+  // it is the Chicago system this site ships with.
+  const effectiveStyle: CitationStyle = citationStyle ?? 'notes-bibliography';
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
@@ -454,6 +468,7 @@ export default function StatementDetailPage() {
         blurb="Primary sources for the original post"
         sources={sortedSources.filter((s) => s.source_type === 'post')}
         numberOf={numberOf}
+        citationStyle={effectiveStyle}
       />
 
       <SourceSection
@@ -461,6 +476,13 @@ export default function StatementDetailPage() {
         blurb="Primary sources supporting the analysis"
         sources={sortedSources.filter((s) => s.source_type === 'analysis')}
         numberOf={numberOf}
+        citationStyle={effectiveStyle}
+      />
+
+      <BibliographySection
+        statementId={statement.id}
+        style={citationStyle}
+        onStyleChange={setCitationStyle}
       />
 
       {/* Share buttons */}

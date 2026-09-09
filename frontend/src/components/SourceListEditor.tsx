@@ -1,6 +1,11 @@
 import React from 'react';
-import type { SourceInput } from '../types';
-import { MEDIA_TYPES, MEDIA_TYPE_LABELS } from '../types';
+import type { Author, SourceInput } from '../types';
+import {
+  DOCUMENT_TYPES,
+  DOCUMENT_TYPE_LABELS,
+  MEDIA_TYPES,
+  MEDIA_TYPE_LABELS,
+} from '../types';
 
 function emptySource(type: 'post' | 'analysis'): SourceInput {
   return {
@@ -16,7 +21,100 @@ function emptySource(type: 'post' | 'analysis'): SourceInput {
     archive_url: '',
     archived_at: '',
     retrieved_at: '',
+    authors: [],
+    container_title: '',
+    edition: '',
+    document_type: '',
+    bill_number: '',
+    congress_number: '',
+    congress_session: '',
+    committee: '',
+    report_number: '',
   };
+}
+
+/**
+ * Chicago inverts the lead author in a bibliography but not in a note, and
+ * never inverts a corporate name, so names are captured in parts rather than
+ * as one string.
+ */
+function AuthorsEditor({
+  authors,
+  onChange,
+}: {
+  authors: Author[];
+  onChange: (next: Author[]) => void;
+}) {
+  function update(index: number, patch: Partial<Author>) {
+    const next = [...authors];
+    next[index] = { ...next[index], ...patch };
+    onChange(next);
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <label className={labelClass}>
+          Authors
+          <span className="block font-normal opacity-80">
+            Leave the name fields blank and use the organisation field for a
+            corporate author such as &ldquo;U.S. Congress&rdquo;
+          </span>
+        </label>
+        <button
+          type="button"
+          onClick={() => onChange([...authors, { given: '', family: '' }])}
+          className="px-2 py-1 text-xs rounded border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition"
+        >
+          + Add author
+        </button>
+      </div>
+
+      {authors.length === 0 && (
+        <p className="text-xs text-[var(--color-text-secondary)] italic">
+          No authors. The citation will begin with the title.
+        </p>
+      )}
+
+      <div className="space-y-2">
+        {authors.map((author, index) => (
+          <div key={index} className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              placeholder="Given name"
+              value={author.given ?? ''}
+              onChange={(e) => update(index, { given: e.target.value, literal: '' })}
+              className={`${inputClass} flex-1 min-w-[8rem]`}
+            />
+            <input
+              type="text"
+              placeholder="Family name"
+              value={author.family ?? ''}
+              onChange={(e) => update(index, { family: e.target.value, literal: '' })}
+              className={`${inputClass} flex-1 min-w-[8rem]`}
+            />
+            <input
+              type="text"
+              placeholder="or Organisation"
+              value={author.literal ?? ''}
+              onChange={(e) =>
+                update(index, { literal: e.target.value, given: '', family: '' })
+              }
+              className={`${inputClass} flex-1 min-w-[8rem]`}
+            />
+            <button
+              type="button"
+              onClick={() => onChange(authors.filter((_, i) => i !== index))}
+              aria-label="Remove author"
+              className="px-2 py-1 text-xs rounded border border-[var(--color-border)] text-[var(--color-danger)] hover:border-[var(--color-danger)] transition"
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 const inputClass =
@@ -208,6 +306,102 @@ export default function SourceListEditor({
                 />
               </Field>
             </div>
+
+            <AuthorsEditor
+              authors={source.authors}
+              onChange={(next) => update(index, 'authors', next)}
+            />
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field
+                label="Container title"
+                hint="The publication the source appears in, e.g. New York Times"
+              >
+                <input
+                  type="text"
+                  value={source.container_title}
+                  onChange={(e) => update(index, 'container_title', e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Edition" hint="Optional, e.g. 2nd ed.">
+                <input
+                  type="text"
+                  value={source.edition}
+                  onChange={(e) => update(index, 'edition', e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+            </div>
+
+            <Field
+              label="Legislative or legal document type"
+              hint="Set this only for bills, hearings and similar; it selects Chicago's public-document form"
+            >
+              <select
+                value={source.document_type}
+                onChange={(e) =>
+                  update(index, 'document_type', e.target.value as SourceInput['document_type'])
+                }
+                className={inputClass}
+              >
+                <option value="">Not a public document</option>
+                {DOCUMENT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {DOCUMENT_TYPE_LABELS[type]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            {source.document_type && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Bill or statute number" hint="e.g. H.R. 1234">
+                  <input
+                    type="text"
+                    value={source.bill_number}
+                    onChange={(e) => update(index, 'bill_number', e.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label="Report number" hint="e.g. H.R. Rep. No. 118-123">
+                  <input
+                    type="text"
+                    value={source.report_number}
+                    onChange={(e) => update(index, 'report_number', e.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label="Congress" hint="Number only, e.g. 118">
+                  <input
+                    type="number"
+                    min={1}
+                    max={999}
+                    value={source.congress_number}
+                    onChange={(e) => update(index, 'congress_number', e.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label="Session" hint="e.g. 2nd">
+                  <input
+                    type="text"
+                    value={source.congress_session}
+                    onChange={(e) => update(index, 'congress_session', e.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
+                <div className="sm:col-span-2">
+                  <Field label="Committee" hint="e.g. Committee on Financial Services">
+                    <input
+                      type="text"
+                      value={source.committee}
+                      onChange={(e) => update(index, 'committee', e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+                </div>
+              </div>
+            )}
 
             <Field
               label="Excerpt"

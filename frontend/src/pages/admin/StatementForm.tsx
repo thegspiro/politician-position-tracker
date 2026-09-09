@@ -33,6 +33,16 @@ function orNull(value: string): string | null {
 function toSourceInput(source: Source): SourceInput {
   return {
     uid: source.uid,
+    authors: source.authors ?? [],
+    container_title: source.container_title ?? '',
+    edition: source.edition ?? '',
+    document_type: source.document_type ?? '',
+    bill_number: source.bill_number ?? '',
+    congress_number:
+      source.congress_number === null ? '' : String(source.congress_number),
+    congress_session: source.congress_session ?? '',
+    committee: source.committee ?? '',
+    report_number: source.report_number ?? '',
     source_type: source.source_type,
     title: source.title,
     url: source.url,
@@ -177,6 +187,22 @@ export default function StatementForm() {
         archive_url: orNull(s.archive_url),
         archived_at: orNull(s.archived_at),
         retrieved_at: orNull(s.retrieved_at),
+        // Blank name rows are dropped rather than rejected by the API.
+        authors: s.authors.filter(
+          (a) =>
+            (a.given ?? '').trim() ||
+            (a.family ?? '').trim() ||
+            (a.literal ?? '').trim(),
+        ),
+        container_title: orNull(s.container_title),
+        edition: orNull(s.edition),
+        document_type: s.document_type === '' ? null : s.document_type,
+        bill_number: orNull(s.bill_number),
+        congress_number:
+          s.congress_number.trim() === '' ? null : Number(s.congress_number),
+        congress_session: orNull(s.congress_session),
+        committee: orNull(s.committee),
+        report_number: orNull(s.report_number),
       }));
 
     const data = {

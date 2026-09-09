@@ -5,6 +5,7 @@ import type {
   IssueDetail,
   Statement,
   SourcePayload,
+  StatementCitations,
   PaginatedResponse,
 } from './types';
 
@@ -242,6 +243,20 @@ export function updateStatement(
     method: 'PUT',
     body: JSON.stringify(data),
   });
+}
+
+export function fetchStatementCitations(
+  id: number | string,
+): Promise<StatementCitations> {
+  return request<StatementCitations>(`/statements/${id}/citations`);
+}
+
+/** Download URLs for a statement's bibliography. */
+export function citationExportUrls(id: number | string) {
+  return {
+    bibtex: `${API_BASE}/statements/${id}/citations.bib`,
+    cslJson: `${API_BASE}/statements/${id}/citations.json`,
+  };
 }
 
 export function deleteStatement(id: number | string): Promise<void> {
