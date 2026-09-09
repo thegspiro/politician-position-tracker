@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import ReactMarkdown from 'react-markdown';
 import { fetchStatement } from '../api';
-import type { Statement } from '../types';
+import AnalysisMarkdown from '../components/AnalysisMarkdown';
+import BibliographySection from '../components/BibliographySection';
+import SourceCard from '../components/SourceCard';
+import { getYouTubeVideoId } from '../lib/embeds';
+import type { CitationStyle, Source, Statement } from '../types';
 
 function partyBadgeClass(party: string): string {
   const p = party.toLowerCase();
@@ -75,21 +78,6 @@ function platformIcon(platform: string): React.ReactNode {
       <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
     </svg>
   );
-}
-
-function getYouTubeVideoId(url: string): string | null {
-  try {
-    const u = new URL(url);
-    if (u.hostname.includes('youtube.com') || u.hostname.includes('youtube-nocookie.com')) {
-      return u.searchParams.get('v');
-    }
-    if (u.hostname === 'youtu.be') {
-      return u.pathname.slice(1).split('/')[0] || null;
-    }
-  } catch {
-    // invalid URL
-  }
-  return null;
 }
 
 function EmbedPost({
@@ -294,11 +282,47 @@ function ShareButtons({ url, title }: { url: string; title: string }) {
   );
 }
 
+function SourceSection({
+  heading,
+  blurb,
+  sources,
+  numberOf,
+  citationStyle,
+}: {
+  heading: string;
+  blurb: string;
+  sources: Source[];
+  numberOf: (source: Source) => number;
+  citationStyle: CitationStyle;
+}) {
+  if (sources.length === 0) return null;
+
+  return (
+    <div className="mb-8">
+      <h2 className="text-xl font-semibold text-[var(--color-text)] mb-3">{heading}</h2>
+      <p className="text-sm text-[var(--color-text-secondary)] mb-3">{blurb}</p>
+      <div className="space-y-3">
+        {sources.map((source) => (
+          <SourceCard
+            key={source.uid}
+            source={source}
+            index={numberOf(source)}
+            citationStyle={citationStyle}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function StatementDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [statement, setStatement] = useState<Statement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Shared with the source cards so a card's citation and the reference list
+  // never show different styles at the same time.
+  const [citationStyle, setCitationStyle] = useState<CitationStyle | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -334,6 +358,16 @@ export default function StatementDetailPage() {
   }
 
   const pageUrl = typeof window !== 'undefined' ? window.location.href : '';
+
+  // One ordering shared by the citation markers and the cards, so "[^2]" in the
+  // analysis always refers to the source numbered [2] below it.
+  const sortedSources = [...(statement.sources ?? [])].sort(
+    (a, b) => a.sort_order - b.sort_order || a.id - b.id,
+  );
+  const numberOf = (source: Source) => sortedSources.indexOf(source) + 1;
+  // Until the citation payload reports the site default, notes form is assumed;
+  // it is the Chicago system this site ships with.
+  const effectiveStyle: CitationStyle = citationStyle ?? 'notes-bibliography';
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
@@ -424,69 +458,32 @@ export default function StatementDetailPage() {
       <div className="mb-8">
         <h2 className="text-xl font-semibold text-[var(--color-text)] mb-3">Analysis</h2>
         <div className="prose text-[var(--color-text)] leading-relaxed">
-          <ReactMarkdown>{statement.analysis}</ReactMarkdown>
+          <AnalysisMarkdown analysis={statement.analysis} sources={sortedSources} />
         </div>
       </div>
 
-      {/* Post Sources */}
-      {statement.sources && statement.sources.filter((s) => s.source_type === 'post').length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-xl font-semibold text-[var(--color-text)] mb-3">Post Sources</h2>
-          <p className="text-sm text-[var(--color-text-secondary)] mb-3">Citations for the original post</p>
-          <div className="space-y-3">
-            {statement.sources.filter((s) => s.source_type === 'post').map((source) => (
-              <div
-                key={source.id}
-                className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg p-4"
-              >
-                <a
-                  href={source.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition break-all"
-                >
-                  {source.title}
-                </a>
-                {source.description && (
-                  <p className="text-sm text-[var(--color-text-secondary)] mt-1 leading-relaxed">
-                    {source.description}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Sources */}
+      <SourceSection
+        heading="Post Sources"
+        blurb="Primary sources for the original post"
+        sources={sortedSources.filter((s) => s.source_type === 'post')}
+        numberOf={numberOf}
+        citationStyle={effectiveStyle}
+      />
 
-      {/* Analysis Sources */}
-      {statement.sources && statement.sources.filter((s) => s.source_type === 'analysis').length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-xl font-semibold text-[var(--color-text)] mb-3">Analysis Sources</h2>
-          <p className="text-sm text-[var(--color-text-secondary)] mb-3">Citations supporting the analysis</p>
-          <div className="space-y-3">
-            {statement.sources.filter((s) => s.source_type === 'analysis').map((source) => (
-              <div
-                key={source.id}
-                className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg p-4"
-              >
-                <a
-                  href={source.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition break-all"
-                >
-                  {source.title}
-                </a>
-                {source.description && (
-                  <p className="text-sm text-[var(--color-text-secondary)] mt-1 leading-relaxed">
-                    {source.description}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <SourceSection
+        heading="Analysis Sources"
+        blurb="Primary sources supporting the analysis"
+        sources={sortedSources.filter((s) => s.source_type === 'analysis')}
+        numberOf={numberOf}
+        citationStyle={effectiveStyle}
+      />
+
+      <BibliographySection
+        statementId={statement.id}
+        style={citationStyle}
+        onStyleChange={setCitationStyle}
+      />
 
       {/* Share buttons */}
       <div className="border-t border-[var(--color-border)] pt-6">

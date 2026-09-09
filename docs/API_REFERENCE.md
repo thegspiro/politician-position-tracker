@@ -180,9 +180,15 @@ Authenticate with the admin password and receive a Bearer token.
 **Response (200):**
 ```json
 {
-  "token": "string"
+  "token": "string",
+  "expires_in": 43200
 }
 ```
+
+`token` is a signed JWT carrying a subject and an expiry. Send it as
+`Authorization: Bearer <token>`. It is valid for `expires_in` seconds
+(`SESSION_TTL_HOURS`, 12 hours by default); after that every authenticated
+endpoint returns 401 and a new login is required.
 
 **Response (401):**
 ```json
@@ -191,11 +197,20 @@ Authenticate with the admin password and receive a Bearer token.
 }
 ```
 
+**Response (429):** returned once `LOGIN_MAX_ATTEMPTS` failed attempts have come
+from the same client address within `LOGIN_WINDOW_SECONDS`. Carries a
+`Retry-After` header. A successful login clears the count.
+```json
+{
+  "detail": "Too many failed login attempts. Try again later."
+}
+```
+
 **Example:**
 ```bash
 curl -X POST http://localhost:9847/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"password": "changeme"}'
+  -d '{"password": "your-admin-password"}'
 ```
 
 ---
@@ -833,10 +848,26 @@ Create a new statement.
 **Source object:**
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `uid` | string or null | No | Supply the existing `uid` when editing a source so it is updated in place and its citations keep working. Omit for a new source; one is assigned |
 | `source_type` | string | Yes | `"post"` or `"analysis"` |
 | `title` | string | Yes | Source title/label |
-| `url` | string | Yes | URL to the source |
-| `description` | string or null | No | Brief description |
+| `url` | string | Yes | URL to the source. Must be an absolute `http://` or `https://` URL |
+| `description` | string or null | No | Brief editorial note |
+| `media_type` | string | No (default `"webpage"`) | One of `webpage`, `document`, `video`, `audio`, `article`, `dataset`. Selects how the source is embedded |
+| `publisher` | string or null | No | Issuing body, e.g. `"Congress.gov"` |
+| `published_date` | datetime or null | No | When the source was published |
+| `excerpt` | string or null | No | Verbatim passage being relied on |
+| `locator` | string or null | No | Where the excerpt lives: `"p. 14"`, `"sec. 203"`, `"01:23:45"`. A timestamp locator starts a video embed at that point |
+| `archive_url` | string or null | No | Snapshot URL. Must be absolute `http(s)` when present |
+| `archived_at` | datetime or null | No | When the snapshot was taken |
+| `retrieved_at` | datetime or null | No | When the original was last confirmed |
+
+Responses also include `id` and `sort_order`. `sort_order` is derived from the
+order sources are submitted in and is not read from the request.
+
+**Validation (422):** returned when `url`, `archive_url` or `post_url` is not an
+absolute http(s) URL, or when `media_type`/`source_type` is not one of the values
+above.
 
 **Response (201):** Full `StatementOut` object (includes politician, issues, sources).
 
@@ -870,7 +901,12 @@ curl -X POST http://localhost:9847/api/statements \
 
 ### PUT /api/statements/{statement_id}
 
-Update an existing statement. **All sources are replaced** -- existing sources are deleted and the new list is created fresh.
+Update an existing statement. Sources are reconciled by `uid`: a source
+submitted with a `uid` belonging to this statement is updated in place, one
+without a `uid` is created, and any existing source whose `uid` is absent from
+the submission is deleted. Submit the `uid` values returned by `GET
+/api/statements/{id}` to keep citation markers and `#source-<uid>` links
+working across the edit.
 
 **Auth Required**: Yes
 

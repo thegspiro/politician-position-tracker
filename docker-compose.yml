@@ -8,8 +8,12 @@ services:
     volumes:
       - db-data:/app/data
     environment:
-      - ADMIN_PASSWORD=changeme
-      - SECRET_KEY=change-this-to-a-random-string
+      # Both are required. The application refuses to start on a published
+      # default value, so set real ones before bringing the stack up:
+      #   ADMIN_PASSWORD  a strong password for the admin panel
+      #   SECRET_KEY      a long random string, e.g. `openssl rand -base64 32`
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?set ADMIN_PASSWORD in a .env file or your environment}
+      - SECRET_KEY=${SECRET_KEY:?set SECRET_KEY in a .env file or your environment}
 
 volumes:
   db-data:

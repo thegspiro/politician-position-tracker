@@ -4,30 +4,75 @@ import type {
   Issue,
   IssueDetail,
   Statement,
+  SourcePayload,
+  StatementCitations,
   PaginatedResponse,
 } from './types';
+
+interface StatementPayload {
+  politician_id: number;
+  issue_ids: number[];
+  title: string;
+  analysis: string;
+  post_url: string;
+  post_platform: string;
+  post_content?: string | null;
+  screenshot_url?: string | null;
+  post_date?: string | null;
+  sources?: SourcePayload[];
+}
 
 const API_BASE = '/api';
 
 // ── Auth token management ───────────────────────────────────
 
-let authToken: string | null = localStorage.getItem('auth_token');
+const TOKEN_KEY = 'auth_token';
+const TOKEN_EXPIRY_KEY = 'auth_token_expires_at';
+
+let authToken: string | null = localStorage.getItem(TOKEN_KEY);
+
+/** Epoch milliseconds at which the stored token stops being accepted. */
+function storedExpiry(): number | null {
+  const raw = localStorage.getItem(TOKEN_EXPIRY_KEY);
+  if (!raw) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Sessions now expire server-side. Dropping a token the moment it lapses means
+ * the admin sees the login screen instead of a wall of failed requests.
+ */
+function tokenHasExpired(): boolean {
+  const expiry = storedExpiry();
+  return expiry !== null && Date.now() >= expiry;
+}
 
 export function getToken(): string | null {
+  if (authToken && tokenHasExpired()) {
+    setToken(null);
+  }
   return authToken;
 }
 
-export function setToken(token: string | null) {
+export function setToken(token: string | null, expiresIn?: number) {
   authToken = token;
   if (token) {
-    localStorage.setItem('auth_token', token);
+    localStorage.setItem(TOKEN_KEY, token);
+    if (expiresIn !== undefined) {
+      localStorage.setItem(
+        TOKEN_EXPIRY_KEY,
+        String(Date.now() + expiresIn * 1000),
+      );
+    }
   } else {
-    localStorage.removeItem('auth_token');
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_EXPIRY_KEY);
   }
 }
 
 export function isLoggedIn(): boolean {
-  return authToken !== null;
+  return getToken() !== null;
 }
 
 // ── Request helper ──────────────────────────────────────────
@@ -36,8 +81,9 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (authToken) {
-    headers['Authorization'] = `Bearer ${authToken}`;
+  const token = getToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
   const res = await fetch(`${API_BASE}${url}`, {
     headers: { ...headers, ...options?.headers },
@@ -58,8 +104,14 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
 // ── Auth ────────────────────────────────────────────────────
 
-export function login(password: string): Promise<{ token: string }> {
-  return request<{ token: string }>('/auth/login', {
+export interface LoginResponse {
+  token: string;
+  /** Token lifetime in seconds. */
+  expires_in: number;
+}
+
+export function login(password: string): Promise<LoginResponse> {
+  return request<LoginResponse>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ password }),
   });
@@ -176,18 +228,7 @@ export function fetchStatement(id: number | string): Promise<Statement> {
   return request<Statement>(`/statements/${id}`);
 }
 
-export function createStatement(data: {
-  politician_id: number;
-  issue_ids: number[];
-  title: string;
-  analysis: string;
-  post_url: string;
-  post_platform: string;
-  post_content?: string | null;
-  screenshot_url?: string | null;
-  post_date?: string | null;
-  sources?: { source_type: string; title: string; url: string; description: string }[];
-}): Promise<Statement> {
+export function createStatement(data: StatementPayload): Promise<Statement> {
   return request<Statement>('/statements', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -196,23 +237,26 @@ export function createStatement(data: {
 
 export function updateStatement(
   id: number | string,
-  data: {
-    politician_id: number;
-    issue_ids: number[];
-    title: string;
-    analysis: string;
-    post_url: string;
-    post_platform: string;
-    post_content?: string | null;
-    screenshot_url?: string | null;
-    post_date?: string | null;
-    sources?: { source_type: string; title: string; url: string; description: string }[];
-  },
+  data: StatementPayload,
 ): Promise<Statement> {
   return request<Statement>(`/statements/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   });
+}
+
+export function fetchStatementCitations(
+  id: number | string,
+): Promise<StatementCitations> {
+  return request<StatementCitations>(`/statements/${id}/citations`);
+}
+
+/** Download URLs for a statement's bibliography. */
+export function citationExportUrls(id: number | string) {
+  return {
+    bibtex: `${API_BASE}/statements/${id}/citations.bib`,
+    cslJson: `${API_BASE}/statements/${id}/citations.json`,
+  };
 }
 
 export function deleteStatement(id: number | string): Promise<void> {
@@ -225,8 +269,9 @@ export async function uploadFile(file: File): Promise<{ url: string }> {
   const formData = new FormData();
   formData.append('file', file);
   const headers: Record<string, string> = {};
-  if (authToken) {
-    headers['Authorization'] = `Bearer ${authToken}`;
+  const token = getToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
   const res = await fetch(`${API_BASE}/uploads`, {
     method: 'POST',

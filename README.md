@@ -12,6 +12,11 @@ Built as a single-container Docker application with a FastAPI backend serving a 
 - **Politician Profiles** -- View all statements from a specific politician with photo, party, office, and state
 - **Issue Tracking** -- Tag statements with multiple issues and browse all statements for a given issue
 - **Social Media Embeds** -- Native embeds for X/Twitter, YouTube, and Bluesky posts; styled blockquotes for Truth Social
+- **Primary Source Embeds** -- Attach primary sources with publisher, date, verbatim excerpt and locator (page, section or timestamp); documents, video and audio embed inline behind a click-to-load control
+- **Chicago Citations** -- Every source, the tracked post, and the page itself formatted to the Chicago Manual of Style (18th ed.), in both Notes-Bibliography and Author-Date, with a per-reader style toggle
+- **Bibliography and Export** -- A reference list on every statement, copy-to-clipboard per entry, and BibTeX / CSL-JSON export for Zotero and pandoc
+- **Inline Citations** -- Cite a source from the analysis body with `[^1]`; the marker links to that source's card
+- **Link Rot Protection** -- Record an archive URL, archive date and retrieval date alongside every source
 - **Sourced Analysis** -- Write analysis with Markdown formatting and attach separate citation lists for the original post and your analysis
 - **Screenshot Backup** -- Upload screenshots of posts as a backup in case the original is deleted
 - **Admin Panel** -- Password-protected admin dashboard for managing all data with full CRUD operations
@@ -51,7 +56,12 @@ Built as a single-container Docker application with a FastAPI backend serving a 
 git clone https://github.com/thegspiro/politician-position-tracker.git
 cd politician-position-tracker
 
-# Edit docker-compose.yml to set your ADMIN_PASSWORD and SECRET_KEY
+# Both credentials are required; the app will not start without them.
+cat > .env <<EOF
+ADMIN_PASSWORD=$(openssl rand -base64 24)
+SECRET_KEY=$(openssl rand -base64 32)
+EOF
+
 docker compose up -d
 ```
 
@@ -66,8 +76,8 @@ docker run -d \
   --name politician-tracker \
   -p 9847:8000 \
   -v politician-tracker-data:/app/data \
-  -e ADMIN_PASSWORD=your-secure-password \
-  -e SECRET_KEY=your-random-secret-key \
+  -e ADMIN_PASSWORD="$(openssl rand -base64 24)" \
+  -e SECRET_KEY="$(openssl rand -base64 32)" \
   politician-tracker
 ```
 
@@ -83,6 +93,21 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
+Outside Docker the default upload directory (`/app/data/uploads`) is usually not
+writable. Set `UPLOAD_DIR` to a local path when running from a source checkout:
+
+```bash
+UPLOAD_DIR=./data/uploads uvicorn app.main:app --reload --port 8000
+```
+
+The schema is managed by Alembic, so apply migrations before the first run (and
+after pulling changes that add any):
+
+```bash
+cd backend
+alembic upgrade head
+```
+
 **Frontend:**
 
 ```bash
@@ -92,6 +117,145 @@ npm run dev
 ```
 
 The frontend dev server runs on `http://localhost:5173` and proxies API requests to `http://localhost:8000`.
+
+**Backend tests:**
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest tests/ -q
+```
+
+**Frontend tests:**
+
+```bash
+cd frontend
+npm test
+```
+
+---
+
+## Working With Primary Sources
+
+Each statement carries two source lists: **Post Sources** (primary sources for
+the original post) and **Analysis Sources** (primary sources supporting your
+analysis). Beyond a title and URL, each source records:
+
+| Field | Purpose |
+|---|---|
+| Media type | `webpage`, `document`, `video`, `audio`, `article` or `dataset`. Selects how the source is embedded |
+| Publisher / Published date | Provenance, e.g. "Congress.gov", 14 Jan 2026 |
+| Excerpt | The verbatim passage being relied on, shown as a pull quote |
+| Locator | Where the excerpt lives: `p. 14`, `sec. 203`, `01:23:45` |
+| Archive URL / Archived on | A snapshot to fall back on when the original link rots |
+| Retrieved on | When the original was last confirmed to say what is quoted |
+
+**Embedding.** A `video` source pointing at YouTube embeds inline, and a
+timestamp locator such as `01:23:45` starts playback at that point. A `document`
+source whose URL ends in `.pdf` offers an inline preview. An `audio` source
+pointing directly at an audio file gets a player. Third-party frames only load
+when the reader clicks, so the page does not call out to every embedded host on
+load, and a publisher that refuses framing degrades to a plain link.
+
+**Citations.** Write `[^1]` in the analysis to cite source `[1]`. Numbering runs
+across both lists combined -- post sources first, then analysis sources -- and
+each source card in the admin form shows the number to use. Rearrange sources
+with the arrow buttons; the numbers follow. Each marker renders as a link to
+that source's card.
+
+**Stable links.** Every source has a `uid` and its card is addressable as
+`#source-<uid>`. Editing a statement updates sources in place rather than
+recreating them, so those links survive edits.
+
+---
+
+## Citations
+
+Sources are formatted to the **Chicago Manual of Style, 18th edition**, in both
+of Chicago's systems:
+
+| System | At the point of citation | In the list |
+|---|---|---|
+| Notes-Bibliography (default) | A note: `Maria Reyes, "Senator Doe Reverses Course," New York Times, January 14, 2026, https://...` | Bibliography, lead author inverted |
+| Author-Date | A parenthetical: `(Reyes 2026, 14)` | References, year moved forward |
+
+`CITATION_STYLE` sets the site default; readers can switch with the toggle on
+any statement page, and their choice is remembered.
+
+### What each field feeds
+
+| Field | Effect on the citation |
+|---|---|
+| Authors | Structured given/family names, or an organisation. Chicago inverts only the lead author in a bibliography, and never inverts an organisation |
+| Container title | The publication the source sits in. Italicised for a periodical, roman for a plain website name |
+| Publisher, edition | Included when they differ from the container |
+| Published date | The date in the citation and the year in author-date forms |
+| Retrieved on | Shown as an access date **only when the source has no publication date**, per the 18th edition |
+| Locator | The page, section or timestamp: `p. 14`, `sec. 203`, `01:23:45` |
+| Document type | Selects Chicago's public-document form for bills, hearings, committee reports, court opinions and executive orders |
+
+A source with only a title and URL still cites correctly; the extra fields add
+precision rather than being required.
+
+### The post and the page
+
+The tracked social media post is cited in Chicago's social-media form, with the
+`@handle` recovered from the post URL for X, Bluesky and Truth Social. Each
+statement page also carries a **Cite this page** block for the tracker entry
+itself, using `SITE_NAME` and the page's own URL.
+
+### Export
+
+Every statement offers its whole bibliography as BibTeX or CSL-JSON:
+
+```
+GET /api/statements/{id}/citations       # all forms, as JSON
+GET /api/statements/{id}/citations.bib   # BibTeX
+GET /api/statements/{id}/citations.json  # CSL-JSON, for Zotero and pandoc
+```
+
+Citations are rendered on the server, so an exported file and the page always
+agree.
+
+### Scope
+
+This covers the source types the tracker records. Chicago defers to Bluebook
+conventions for much legal material and carries far more special cases than are
+implemented, so an unusual source may need an editor's hand. Where the 18th
+edition differs from the 17th in a way that changes output -- access dates,
+most notably -- `backend/app/citations.py` notes it at the point it applies.
+
+---
+
+## Database Migrations
+
+The schema is owned by [Alembic](https://alembic.sqlalchemy.org/). The container
+entrypoint runs `alembic upgrade head` on every start, before the server binds,
+so a `docker compose pull && docker compose up -d` applies pending migrations
+automatically. Nothing needs to be run by hand for a normal upgrade.
+
+Working with migrations locally, from `backend/`:
+
+```bash
+alembic upgrade head        # apply everything pending
+alembic current             # show the revision the database is on
+alembic history             # list the migration chain
+alembic downgrade -1        # roll back one revision
+```
+
+To add a migration after changing `app/models.py`:
+
+```bash
+alembic revision --autogenerate -m "describe the change"
+```
+
+Review the generated file before committing it -- autogenerate does not detect
+every change, and column additions to a populated table usually need an explicit
+backfill (see `migrations/versions/0002_primary_source_fields.py` for the
+add-nullable, backfill, then set-NOT-NULL pattern).
+
+`DATABASE_URL` drives both the application and the migrations, so the same
+commands work against SQLite and MySQL without edits.
 
 ---
 
@@ -139,9 +303,63 @@ By default, data is stored at `/mnt/user/appdata/politician-tracker` on the Unra
 
 | Variable | Default | Required | Description |
 |---|---|---|---|
-| `ADMIN_PASSWORD` | `changeme` | Yes | Password for the admin panel. **Change this in production.** |
-| `SECRET_KEY` | `politician-tracker-secret-key` | Yes | Secret used to generate auth tokens. Use a long random string. |
+| `ADMIN_PASSWORD` | *(none)* | **Yes** | Password for the admin panel. The application refuses to start if this is unset or `changeme`. |
+| `SECRET_KEY` | *(none)* | **Yes** | Signs admin session tokens. Use a long random string: `openssl rand -base64 32`. The application refuses to start on a published default. |
 | `DATABASE_URL` | `sqlite:////app/data/politician_tracker.db` | No | SQLAlchemy database connection string. Defaults to SQLite in the data volume. |
+| `SESSION_TTL_HOURS` | `12` | No | How long an admin session lasts before re-login is required. |
+| `LOGIN_MAX_ATTEMPTS` | `5` | No | Failed logins allowed per client address before further attempts are refused. |
+| `LOGIN_WINDOW_SECONDS` | `900` | No | Window over which failed logins are counted. |
+| `MAX_UPLOAD_MB` | `5` | No | Largest accepted upload. |
+| `UPLOAD_DIR` | `/app/data/uploads` | No | Where uploads are stored. Set this when running outside Docker. |
+| `CONTENT_SECURITY_POLICY` | *(built-in)* | No | Overrides the default CSP. Set to an empty string to disable it while diagnosing a blocked embed. |
+| `SITE_NAME` | `Politician Tracker` | No | Site name used in the "cite this page" citation. |
+| `SITE_URL` | *(derived from the request)* | No | Public base URL, used in the "cite this page" citation. Set this when behind a reverse proxy that does not forward the original host. |
+| `CITATION_STYLE` | `notes-bibliography` | No | Default Chicago system: `notes-bibliography` or `author-date`. Readers can override it per browser. |
+| `CORS_ORIGINS` | *(empty)* | No | Comma-separated origins allowed to make credentialed API requests. Leave empty in production; the Vite dev server proxies `/api`, so local development does not need it either. |
+| `ALLOW_INSECURE_DEFAULTS` | *(unset)* | No | Set to `1` to start with a default or missing password/secret. **Never set this on a reachable host.** |
+
+### Setting credentials
+
+`docker-compose.yml` reads both required values from the environment, so create a
+`.env` file next to it:
+
+```bash
+cat > .env <<EOF
+ADMIN_PASSWORD=$(openssl rand -base64 24)
+SECRET_KEY=$(openssl rand -base64 32)
+EOF
+```
+
+`docker compose up -d` will refuse to start until both are set.
+
+---
+
+## Security Notes
+
+The admin panel is the only authenticated surface; everything else is public by
+design. What protects it:
+
+- **Sessions expire.** Logging in mints a signed token valid for
+  `SESSION_TTL_HOURS`. The token is not derived from the password, so it can
+  lapse without a password change.
+- **Login attempts are rate limited** per client address. The limit is held in
+  memory, so it applies per process -- correct for this single-container
+  application, but a multi-replica deployment would need shared state.
+- **No shipped credentials.** The application will not start on a default or
+  missing `ADMIN_PASSWORD`/`SECRET_KEY`.
+- **Uploads are restricted** to PNG, JPEG, GIF and WebP, verified against the
+  file's leading bytes rather than its extension, and capped at `MAX_UPLOAD_MB`.
+  SVG is rejected: uploads are served from the application's own origin, and an
+  SVG can carry script. Uploaded files are additionally served under a
+  `default-src 'none'; sandbox` policy.
+- **A Content-Security-Policy** restricts script to the application itself and
+  the embed providers it uses. `frame-src` is permissive because embedding an
+  arbitrary publisher's document is the point; `script-src` is what keeps that
+  from becoming code execution.
+
+If you put this behind a reverse proxy, terminate TLS there and forward the real
+client address, otherwise every login attempt appears to come from the proxy and
+the rate limit will apply to all users collectively.
 
 ---
 

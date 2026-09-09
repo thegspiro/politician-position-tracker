@@ -14,7 +14,7 @@ from ..schemas import (
 router = APIRouter(prefix="/api/issues", tags=["issues"])
 
 
-@router.get("/", response_model=PaginatedResponse[IssueOut])
+@router.get("", response_model=PaginatedResponse[IssueOut])
 def list_issues(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -47,7 +47,7 @@ def get_issue(issue_id: int, db: Session = Depends(get_db)):
     return issue
 
 
-@router.post("/", response_model=IssueOut, status_code=201)
+@router.post("", response_model=IssueOut, status_code=201)
 def create_issue(
     data: IssueCreate,
     _admin: str = Depends(require_admin),

@@ -116,13 +116,40 @@ Tables are auto-created on application startup via `Base.metadata.create_all(bin
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | INTEGER | PRIMARY KEY, AUTOINCREMENT | Unique identifier |
+| `uid` | VARCHAR(12) | NOT NULL, UNIQUE | Stable public identifier, preserved across statement edits |
 | `statement_id` | INTEGER | FOREIGN KEY -> statements.id, NOT NULL | Parent statement |
 | `source_type` | VARCHAR(20) | NOT NULL, DEFAULT "analysis" | Either `"post"` or `"analysis"` |
 | `title` | VARCHAR(500) | NOT NULL | Source title/label |
-| `url` | VARCHAR(1000) | NOT NULL | URL to the source |
-| `description` | TEXT | NULLABLE | Brief description of the source |
+| `url` | VARCHAR(1000) | NOT NULL | URL to the source (http/https only) |
+| `description` | TEXT | NULLABLE | Brief editorial note about the source |
+| `media_type` | VARCHAR(20) | NOT NULL, DEFAULT "webpage" | One of `webpage`, `document`, `video`, `audio`, `article`, `dataset`. Selects the embed renderer |
+| `publisher` | VARCHAR(200) | NULLABLE | Issuing body, e.g. "Congress.gov", "C-SPAN", "FEC" |
+| `published_date` | DATETIME | NULLABLE | When the source was published |
+| `excerpt` | TEXT | NULLABLE | Verbatim passage being relied on |
+| `locator` | VARCHAR(100) | NULLABLE | Where the excerpt lives: "p. 14", "sec. 203", "01:23:45" |
+| `archive_url` | VARCHAR(1000) | NULLABLE | Snapshot used when the original rots (http/https only) |
+| `archived_at` | DATETIME | NULLABLE | When the snapshot was taken |
+| `retrieved_at` | DATETIME | NULLABLE | When the original was last confirmed |
+| `sort_order` | INTEGER | NOT NULL, DEFAULT 0 | Display order; also the citation marker number |
+| `authors` | JSON | NULLABLE | Ordered list of `{given, family}` or `{literal}` objects. Nullable rather than defaulted because MySQL before 8.0.13 rejects DEFAULT on a JSON column; readers treat NULL as an empty list |
+| `container_title` | VARCHAR(300) | NULLABLE | The publication the source sits in. Italicised for periodicals, roman for plain website names |
+| `edition` | VARCHAR(100) | NULLABLE | Edition statement |
+| `document_type` | VARCHAR(40) | NULLABLE | One of `bill`, `statute`, `hearing`, `committee_report`, `court_opinion`, `executive_order`, `other`. Selects Chicago's public-document form |
+| `bill_number` | VARCHAR(50) | NULLABLE | e.g. "H.R. 1234" |
+| `congress_number` | INTEGER | NULLABLE | e.g. 118 |
+| `congress_session` | VARCHAR(20) | NULLABLE | e.g. "2nd" |
+| `committee` | VARCHAR(300) | NULLABLE | Committee holding a hearing |
+| `report_number` | VARCHAR(50) | NULLABLE | e.g. "H.R. Rep. No. 118-123" |
 
 **Relationships**: Belongs to one `statement`.
+
+**Why `uid` exists**: saving a statement rewrites its source rows, so `id` is not
+stable across edits. `uid` is generated once and preserved, so citation markers
+and `#source-<uid>` fragment links keep working after an edit.
+
+**Citations**: a `[^1]` marker in a statement's `analysis` refers to the source
+numbered `[1]` in the rendered source list, which is ordered by `sort_order`.
+Markers are rendered as links to that source's card.
 
 #### `statement_issues` (Association Table)
 
@@ -691,12 +718,24 @@ The theme is managed by `ThemeContext.tsx`:
 
 | Variable | Default | Required | Where Used | Description |
 |---|---|---|---|---|
-| `ADMIN_PASSWORD` | `changeme` | Yes | `backend/app/auth.py` | The single admin password. Used for login validation and HMAC token generation. |
-| `SECRET_KEY` | `politician-tracker-secret-key` | Yes | `backend/app/auth.py` | Secret key for HMAC-SHA256 token generation. Used as the HMAC key. |
+| `ADMIN_PASSWORD` | *(none)* | **Yes** | `backend/app/auth.py` | The single admin password, compared in constant time. Startup fails if unset or `changeme`. |
+| `SECRET_KEY` | *(none)* | **Yes** | `backend/app/auth.py` | HS256 signing key for session tokens. Startup fails on a published default. |
 | `DATABASE_URL` | `sqlite:///./politician_tracker.db` (dev) / `sqlite:////app/data/politician_tracker.db` (Docker) | No | `backend/app/database.py` | SQLAlchemy database connection string. |
+| `SESSION_TTL_HOURS` | `12` | No | `backend/app/auth.py` | Session token lifetime. |
+| `LOGIN_MAX_ATTEMPTS` | `5` | No | `backend/app/auth.py` | Failed logins per client address before throttling. |
+| `LOGIN_WINDOW_SECONDS` | `900` | No | `backend/app/auth.py` | Window over which failures are counted. |
+| `MAX_UPLOAD_MB` | `5` | No | `backend/app/main.py` | Largest accepted upload. |
+| `UPLOAD_DIR` | `/app/data/uploads` | No | `backend/app/main.py` | Upload storage directory. |
+| `CONTENT_SECURITY_POLICY` | *(built-in)* | No | `backend/app/main.py` | Overrides the CSP; empty string disables it. |
+| `CORS_ORIGINS` | *(empty)* | No | `backend/app/main.py` | Comma-separated allowed origins. Off by default. |
+| `SITE_NAME` | `Politician Tracker` | No | `backend/app/settings.py` | Site name used in the "cite this page" citation. |
+| `SITE_URL` | *(from request)* | No | `backend/app/routers/statements.py` | Public base URL for the "cite this page" citation. |
+| `CITATION_STYLE` | `notes-bibliography` | No | `backend/app/settings.py` | Default Chicago system. An unrecognised value falls back to the default rather than failing the boot. |
+| `ALLOW_INSECURE_DEFAULTS` | *(unset)* | No | `backend/app/auth.py` | Permits startup without real credentials. Never set on a reachable host. |
 
 ### Notes on Defaults
 
 - In the Dockerfile, `DATABASE_URL` is set to `sqlite:////app/data/politician_tracker.db` (four slashes for an absolute path) so the database is stored in the persistent volume.
 - In local development (without Docker), the default is `sqlite:///./politician_tracker.db` (three slashes for a relative path), which creates the database in the `backend/` directory.
-- The `ADMIN_PASSWORD` and `SECRET_KEY` defaults are intentionally insecure. They should always be changed in production.
+- `ADMIN_PASSWORD` and `SECRET_KEY` no longer have defaults. The application raises at startup rather than running with a value published in this repository. `ALLOW_INSECURE_DEFAULTS=1` overrides this for local development only.
+- Session tokens are signed JWTs with an expiry, not a value derived from the password. Changing `SECRET_KEY` invalidates every existing session.

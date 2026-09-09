@@ -1,32 +1,104 @@
 import os
 import uuid
+from datetime import datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from . import citations, settings
 from .auth import require_admin, router as auth_router
-from .database import Base, engine, get_db
-from .models import Issue, Politician, Source, Statement
+from .database import get_db
+from .models import Issue, Politician, Source, Statement, new_source_uid
 from .routers import issues, politicians, statements
 from .schemas import IssueOut, PoliticianOut, SourceOut, StatementOut
 
-Base.metadata.create_all(bind=engine)
+# The schema is owned by Alembic, not by create_all. The container entrypoint
+# runs "alembic upgrade head" before starting the server; see the README for
+# the local development equivalent.
 
 app = FastAPI(title="Politician Position Tracker")
 
-# CORS is only needed during local dev (Vite on :5173 -> FastAPI on :8000)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# --- Security headers ---
+#
+# The application embeds third-party media, so the policy has to name the hosts
+# those embeds come from. It is deliberately strict about what may execute:
+# script-src lists only the embed providers, and object-src is closed entirely.
+#
+# frame-src is broad because a "document" source can point at any publisher's
+# PDF. Framing arbitrary https documents is the feature; executing arbitrary
+# script is not, and script-src is what prevents that.
+CSP_DIRECTIVES = [
+    "default-src 'self'",
+    "script-src 'self' https://platform.twitter.com https://embed.bsky.app "
+    "https://cdn.syndication.twimg.com",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "media-src 'self' https:",
+    "font-src 'self' data:",
+    "connect-src 'self' https://embed.bsky.app https://cdn.syndication.twimg.com",
+    "frame-src https:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+]
+
+# Set CONTENT_SECURITY_POLICY to override the default, or to the empty string to
+# disable the header while diagnosing a blocked embed.
+CONTENT_SECURITY_POLICY = os.environ.get(
+    "CONTENT_SECURITY_POLICY", "; ".join(CSP_DIRECTIVES)
 )
+
+# Uploaded files are attacker-influenced content served from our own origin.
+# This policy lets nothing in them run, load or navigate.
+UPLOAD_CSP = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox"
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
+    )
+
+    if request.url.path.startswith("/uploads/"):
+        response.headers["Content-Security-Policy"] = UPLOAD_CSP
+        response.headers["X-Frame-Options"] = "DENY"
+    elif CONTENT_SECURITY_POLICY:
+        response.headers.setdefault(
+            "Content-Security-Policy", CONTENT_SECURITY_POLICY
+        )
+
+    return response
+
+
+# CORS is only needed during local dev (Vite on :5173 -> FastAPI on :8000), so
+# it is off unless CORS_ORIGINS names the origins to allow. Enabling it in
+# production would let another site make credentialed requests to this API.
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
+if CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Include routers
 app.include_router(auth_router)
@@ -40,11 +112,50 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/config")
+def public_config():
+    """Site settings the frontend needs before rendering."""
+    return {
+        "site_name": settings.SITE_NAME,
+        "citation_style": settings.CITATION_STYLE,
+        "citation_styles": list(citations.CITATION_STYLES),
+    }
+
+
 # --- Upload endpoint ---
-UPLOAD_DIR = Path("/app/data/uploads")
+# Defaults to the container path; overridable so the app can run (and be tested)
+# outside Docker without needing to create /app.
+UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/data/uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "5")) * 1024 * 1024
+_UPLOAD_CHUNK = 64 * 1024
+
+# SVG is deliberately absent. Uploads are served from the application's own
+# origin, and an SVG is a script-bearing document: opening one would execute
+# attacker-controlled JavaScript with access to same-origin storage. Raster
+# formats cannot do this.
+ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+
+# Leading bytes each accepted format must start with. Checked so that the
+# extension cannot be used to disguise a different file type.
+_MAGIC_PREFIXES: dict[str, tuple[bytes, ...]] = {
+    ".png": (b"\x89PNG\r\n\x1a\n",),
+    ".jpg": (b"\xff\xd8\xff",),
+    ".jpeg": (b"\xff\xd8\xff",),
+    ".gif": (b"GIF87a", b"GIF89a"),
+    ".webp": (b"RIFF",),
+}
+
+
+def _content_matches_extension(head: bytes, ext: str) -> bool:
+    prefixes = _MAGIC_PREFIXES.get(ext, ())
+    if not any(head.startswith(prefix) for prefix in prefixes):
+        return False
+    # RIFF is a container; confirm the WEBP form specifically.
+    if ext == ".webp":
+        return len(head) >= 12 and head[8:12] == b"WEBP"
+    return True
 
 
 @app.post("/api/uploads")
@@ -54,16 +165,45 @@ def upload_file(
 ):
     ext = Path(file.filename).suffix.lower() if file.filename else ""
     if ext not in ALLOWED_EXTENSIONS:
-        from fastapi import HTTPException
         raise HTTPException(
             status_code=400,
-            detail=f"File type '{ext}' not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}",
+            detail=(
+                f"File type '{ext}' not allowed. "
+                f"Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+            ),
         )
+
+    head = file.file.read(12)
+    if not _content_matches_extension(head, ext):
+        raise HTTPException(
+            status_code=400,
+            detail=f"File content does not match the '{ext}' extension.",
+        )
+
     filename = f"{uuid.uuid4().hex}{ext}"
     dest = UPLOAD_DIR / filename
-    with open(dest, "wb") as f:
-        contents = file.file.read()
-        f.write(contents)
+
+    # Streamed with a running total so an oversized upload is refused instead of
+    # being read into memory in full.
+    written = len(head)
+    try:
+        with open(dest, "wb") as out:
+            out.write(head)
+            while chunk := file.file.read(_UPLOAD_CHUNK):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            "File is larger than the "
+                            f"{MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit."
+                        ),
+                    )
+                out.write(chunk)
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
+
     return {"url": f"/uploads/{filename}"}
 
 
@@ -107,6 +247,16 @@ def export_data(
 
 
 # --- Data import endpoint ---
+def _parse_datetime(value: object) -> datetime | None:
+    """Parse an ISO-8601 string from a backup, tolerating a trailing "Z"."""
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 class ImportData(BaseModel):
     politicians: list[dict] = []
     issues: list[dict] = []
@@ -120,9 +270,12 @@ def import_data(
     db: Session = Depends(get_db),
 ):
     """Import data from a JSON backup. Merges with existing data (skips duplicates by name)."""
-    from datetime import datetime as dt
-
     stats = {"politicians": 0, "issues": 0, "statements": 0, "sources": 0}
+
+    # uids must stay unique. A backup taken from another instance can collide
+    # with a uid already present here, so taken uids are tracked and a fresh
+    # one is generated on conflict.
+    taken_uids = {uid for (uid,) in db.query(Source.uid).all()}
 
     # Map old IDs to new IDs
     politician_id_map: dict[int, int] = {}
@@ -177,12 +330,7 @@ def import_data(
         if existing:
             continue
 
-        post_date = None
-        if stmt_data.get("post_date"):
-            try:
-                post_date = dt.fromisoformat(stmt_data["post_date"].replace("Z", "+00:00"))
-            except (ValueError, AttributeError):
-                pass
+        post_date = _parse_datetime(stmt_data.get("post_date"))
 
         stmt = Statement(
             politician_id=new_pol_id,
@@ -201,7 +349,7 @@ def import_data(
             old_issue_id = issue_entry.get("id", 0)
             new_issue_id = issue_id_map.get(old_issue_id)
             if new_issue_id:
-                issue_obj = db.query(Issue).get(new_issue_id)
+                issue_obj = db.get(Issue, new_issue_id)
                 if issue_obj:
                     stmt.issues.append(issue_obj)
 
@@ -209,13 +357,39 @@ def import_data(
         db.flush()
 
         # Import sources
-        for src_data in stmt_data.get("sources", []):
+        for position, src_data in enumerate(stmt_data.get("sources", [])):
+            uid = src_data.get("uid")
+            if not uid or uid in taken_uids:
+                uid = new_source_uid()
+                while uid in taken_uids:
+                    uid = new_source_uid()
+            taken_uids.add(uid)
+
             source = Source(
                 statement_id=stmt.id,
+                uid=uid,
                 source_type=src_data.get("source_type", "analysis"),
                 title=src_data.get("title", ""),
                 url=src_data.get("url", ""),
                 description=src_data.get("description"),
+                media_type=src_data.get("media_type") or "webpage",
+                publisher=src_data.get("publisher"),
+                published_date=_parse_datetime(src_data.get("published_date")),
+                excerpt=src_data.get("excerpt"),
+                locator=src_data.get("locator"),
+                archive_url=src_data.get("archive_url"),
+                archived_at=_parse_datetime(src_data.get("archived_at")),
+                retrieved_at=_parse_datetime(src_data.get("retrieved_at")),
+                sort_order=src_data.get("sort_order", position),
+                authors=src_data.get("authors") or None,
+                container_title=src_data.get("container_title"),
+                edition=src_data.get("edition"),
+                document_type=src_data.get("document_type"),
+                bill_number=src_data.get("bill_number"),
+                congress_number=src_data.get("congress_number"),
+                congress_session=src_data.get("congress_session"),
+                committee=src_data.get("committee"),
+                report_number=src_data.get("report_number"),
             )
             db.add(source)
             stats["sources"] += 1
@@ -229,6 +403,34 @@ def import_data(
 # --- Serve the React SPA from the built frontend ---
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
+
+def resolve_static_file(path: str) -> Path | None:
+    """Resolve a request path to a file inside STATIC_DIR, or None.
+
+    The request path is attacker-controlled and arrives percent-decoded, so it
+    can contain ".." segments that escape STATIC_DIR (e.g. "%2e%2e/data/...").
+    Resolving the candidate and requiring STATIC_DIR to be one of its parents
+    confines every response to the built frontend directory.
+    """
+    static_root = STATIC_DIR.resolve()
+    candidate = (static_root / path).resolve()
+    if static_root not in candidate.parents:
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
+
+
+# Prefixes that belong to the backend. A request under one of these must never
+# be answered with the SPA shell, or a missing endpoint would look like a
+# successful HTML response to the client.
+BACKEND_PREFIXES = ("/api", "/uploads", "/docs", "/redoc", "/openapi.json")
+
+
+def _is_backend_path(path: str) -> bool:
+    return any(path == prefix or path.startswith(prefix + "/") for prefix in BACKEND_PREFIXES)
+
+
 if STATIC_DIR.is_dir():
     # Serve static assets (JS, CSS, images) at /assets
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
@@ -238,10 +440,17 @@ if STATIC_DIR.is_dir():
     async def favicon():
         return FileResponse(STATIC_DIR / "favicon.svg")
 
-    # SPA catch-all: any non-API route serves index.html so React Router works
-    @app.get("/{path:path}")
-    async def serve_spa(request: Request, path: str):
-        file_path = STATIC_DIR / path
-        if file_path.is_file():
+    # The SPA fallback is an exception handler rather than a "/{path:path}"
+    # route. A catch-all route matches before Starlette's trailing-slash
+    # redirect runs, so it shadowed every collection endpoint: a request for
+    # "/api/politicians" matched the catch-all and returned index.html instead
+    # of JSON. As a 404 handler it runs only after real routing has failed.
+    @app.exception_handler(StarletteHTTPException)
+    async def spa_fallback(request: Request, exc: StarletteHTTPException):
+        if exc.status_code != 404 or _is_backend_path(request.url.path):
+            return await http_exception_handler(request, exc)
+
+        file_path = resolve_static_file(request.url.path.lstrip("/"))
+        if file_path is not None:
             return FileResponse(file_path)
         return FileResponse(STATIC_DIR / "index.html")

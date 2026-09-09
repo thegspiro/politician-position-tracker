@@ -41,7 +41,9 @@ To manage content (add, edit, or delete politicians, issues, and statements), yo
 
 [Screenshot needed: Login page]
 
-3. Enter the admin password. The default password is `changeme`, but your administrator should have changed this during setup. If you do not know the password, check the `ADMIN_PASSWORD` environment variable in the Docker configuration.
+3. Enter the admin password. There is no default: it was chosen when the application was installed. If you do not know it, check the `ADMIN_PASSWORD` environment variable in the Docker configuration.
+
+   Sessions last 12 hours by default, after which you will be asked to log in again. After five failed attempts, further logins from your address are refused for 15 minutes.
 4. Click **Login**.
 5. If the password is correct, you will be redirected to the Admin Dashboard. If incorrect, an error message will appear.
 
