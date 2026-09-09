@@ -20,7 +20,8 @@
     issue tagging, social media embeds, admin panel with authentication, light/dark mode,
     data export, and share buttons.
 
-    Default admin password: changeme (change via ADMIN_PASSWORD environment variable).
+    You must set ADMIN_PASSWORD and SECRET_KEY. The container refuses to start on a
+    default value, so there is no unprotected first boot.
   </Overview>
   <Category>Productivity: Tools:</Category>
   <WebUI>http://[IP]:[PORT:9847]/</WebUI>
@@ -50,12 +51,12 @@
   </Data>
   <Environment>
     <Variable>
-      <Value>changeme</Value>
+      <Value/>
       <Name>ADMIN_PASSWORD</Name>
       <Mode/>
     </Variable>
     <Variable>
-      <Value>change-this-to-a-random-string</Value>
+      <Value/>
       <Name>SECRET_KEY</Name>
       <Mode/>
     </Variable>
@@ -67,7 +68,7 @@
   </Environment>
   <Config Name="Web UI Port" Target="8000" Default="9847" Mode="tcp" Description="Port for the web interface" Type="Port" Display="always" Required="true" Mask="false">9847</Config>
   <Config Name="Data Path" Target="/app/data" Default="/mnt/user/appdata/politician-tracker" Mode="rw" Description="Path for database and uploaded files" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/politician-tracker</Config>
-  <Config Name="Admin Password" Target="ADMIN_PASSWORD" Default="changeme" Description="Password for the admin panel. Change this!" Type="Variable" Display="always" Required="true" Mask="true">changeme</Config>
-  <Config Name="Secret Key" Target="SECRET_KEY" Default="change-this-to-a-random-string" Description="Secret key for token generation. Use a random string." Type="Variable" Display="always" Required="true" Mask="true">change-this-to-a-random-string</Config>
+  <Config Name="Admin Password" Target="ADMIN_PASSWORD" Default="" Description="Required. Password for the admin panel. The container will not start without one." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="Secret Key" Target="SECRET_KEY" Default="" Description="Required. Signs admin session tokens. Use a long random string, e.g. the output of: openssl rand -base64 32" Type="Variable" Display="always" Required="true" Mask="true"/>
   <Config Name="Database URL" Target="DATABASE_URL" Default="sqlite:////app/data/politician_tracker.db" Description="Database connection string" Type="Variable" Display="advanced" Required="false" Mask="false">sqlite:////app/data/politician_tracker.db</Config>
 </Container>

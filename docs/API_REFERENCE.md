@@ -180,9 +180,15 @@ Authenticate with the admin password and receive a Bearer token.
 **Response (200):**
 ```json
 {
-  "token": "string"
+  "token": "string",
+  "expires_in": 43200
 }
 ```
+
+`token` is a signed JWT carrying a subject and an expiry. Send it as
+`Authorization: Bearer <token>`. It is valid for `expires_in` seconds
+(`SESSION_TTL_HOURS`, 12 hours by default); after that every authenticated
+endpoint returns 401 and a new login is required.
 
 **Response (401):**
 ```json
@@ -191,11 +197,20 @@ Authenticate with the admin password and receive a Bearer token.
 }
 ```
 
+**Response (429):** returned once `LOGIN_MAX_ATTEMPTS` failed attempts have come
+from the same client address within `LOGIN_WINDOW_SECONDS`. Carries a
+`Retry-After` header. A successful login clears the count.
+```json
+{
+  "detail": "Too many failed login attempts. Try again later."
+}
+```
+
 **Example:**
 ```bash
 curl -X POST http://localhost:9847/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"password": "changeme"}'
+  -d '{"password": "your-admin-password"}'
 ```
 
 ---

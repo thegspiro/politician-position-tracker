@@ -8,7 +8,13 @@ set -e
 APP_NAME="politician-tracker"
 DATA_DIR="/mnt/user/appdata/${APP_NAME}"
 PORT="${PORT:-9847}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-changeme}"
+# A password is generated when one is not supplied. The application refuses to
+# start on a published default, so there is no weak fallback to inherit.
+GENERATED_PASSWORD=""
+if [ -z "${ADMIN_PASSWORD:-}" ]; then
+  GENERATED_PASSWORD="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)"
+  ADMIN_PASSWORD="${GENERATED_PASSWORD}"
+fi
 SECRET_KEY="${SECRET_KEY:-$(head -c 32 /dev/urandom | base64)}"
 BUILD_DIR="/tmp/${APP_NAME}-build"
 
@@ -16,7 +22,11 @@ echo "=== Politician Tracker Installer ==="
 echo ""
 echo "  Port:           ${PORT}"
 echo "  Data directory:  ${DATA_DIR}"
-echo "  Admin password:  ${ADMIN_PASSWORD}"
+if [ -n "${GENERATED_PASSWORD}" ]; then
+  echo "  Admin password:  ${ADMIN_PASSWORD}  (generated - save this now)"
+else
+  echo "  Admin password:  (supplied via ADMIN_PASSWORD)"
+fi
 echo ""
 
 # Clone and build
@@ -47,7 +57,12 @@ rm -rf "${BUILD_DIR}"
 echo ""
 echo "=== Installation complete! ==="
 echo "  Access the app at: http://$(hostname -I | awk '{print $1}'):${PORT}"
-echo "  Admin password:    ${ADMIN_PASSWORD}"
+if [ -n "${GENERATED_PASSWORD}" ]; then
+  echo "  Admin password:    ${ADMIN_PASSWORD}"
+  echo "  ^ Generated for this install. Save it now; it is not stored anywhere else."
+else
+  echo "  Admin password:    (the value you supplied)"
+fi
 echo ""
 echo "  To customize, set environment variables before running:"
 echo "    PORT=9847 ADMIN_PASSWORD=mypassword bash install-unraid.sh"

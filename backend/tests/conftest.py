@@ -21,6 +21,12 @@ _TMP = Path(tempfile.mkdtemp(prefix="ppt-tests-"))
 os.environ.setdefault("UPLOAD_DIR", str(_TMP / "uploads"))
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TMP / 'test.db'}")
 
+# Credentials must be set before app.auth is imported: it refuses to load on a
+# published default value.
+TEST_ADMIN_PASSWORD = "test-admin-password"
+os.environ.setdefault("ADMIN_PASSWORD", TEST_ADMIN_PASSWORD)
+os.environ.setdefault("SECRET_KEY", "test-secret-key-not-used-anywhere-real")
+
 # The SPA catch-all is only registered when the built frontend is present. In a
 # source checkout it is not, so a minimal stand-in is created at the same path
 # the Docker build writes to. It is gitignored and overwritten by real builds.

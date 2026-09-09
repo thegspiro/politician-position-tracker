@@ -54,7 +54,12 @@ Built as a single-container Docker application with a FastAPI backend serving a 
 git clone https://github.com/thegspiro/politician-position-tracker.git
 cd politician-position-tracker
 
-# Edit docker-compose.yml to set your ADMIN_PASSWORD and SECRET_KEY
+# Both credentials are required; the app will not start without them.
+cat > .env <<EOF
+ADMIN_PASSWORD=$(openssl rand -base64 24)
+SECRET_KEY=$(openssl rand -base64 32)
+EOF
+
 docker compose up -d
 ```
 
@@ -69,8 +74,8 @@ docker run -d \
   --name politician-tracker \
   -p 9847:8000 \
   -v politician-tracker-data:/app/data \
-  -e ADMIN_PASSWORD=your-secure-password \
-  -e SECRET_KEY=your-random-secret-key \
+  -e ADMIN_PASSWORD="$(openssl rand -base64 24)" \
+  -e SECRET_KEY="$(openssl rand -base64 32)" \
   politician-tracker
 ```
 
@@ -238,9 +243,60 @@ By default, data is stored at `/mnt/user/appdata/politician-tracker` on the Unra
 
 | Variable | Default | Required | Description |
 |---|---|---|---|
-| `ADMIN_PASSWORD` | `changeme` | Yes | Password for the admin panel. **Change this in production.** |
-| `SECRET_KEY` | `politician-tracker-secret-key` | Yes | Secret used to generate auth tokens. Use a long random string. |
+| `ADMIN_PASSWORD` | *(none)* | **Yes** | Password for the admin panel. The application refuses to start if this is unset or `changeme`. |
+| `SECRET_KEY` | *(none)* | **Yes** | Signs admin session tokens. Use a long random string: `openssl rand -base64 32`. The application refuses to start on a published default. |
 | `DATABASE_URL` | `sqlite:////app/data/politician_tracker.db` | No | SQLAlchemy database connection string. Defaults to SQLite in the data volume. |
+| `SESSION_TTL_HOURS` | `12` | No | How long an admin session lasts before re-login is required. |
+| `LOGIN_MAX_ATTEMPTS` | `5` | No | Failed logins allowed per client address before further attempts are refused. |
+| `LOGIN_WINDOW_SECONDS` | `900` | No | Window over which failed logins are counted. |
+| `MAX_UPLOAD_MB` | `5` | No | Largest accepted upload. |
+| `UPLOAD_DIR` | `/app/data/uploads` | No | Where uploads are stored. Set this when running outside Docker. |
+| `CONTENT_SECURITY_POLICY` | *(built-in)* | No | Overrides the default CSP. Set to an empty string to disable it while diagnosing a blocked embed. |
+| `CORS_ORIGINS` | *(empty)* | No | Comma-separated origins allowed to make credentialed API requests. Leave empty in production; the Vite dev server proxies `/api`, so local development does not need it either. |
+| `ALLOW_INSECURE_DEFAULTS` | *(unset)* | No | Set to `1` to start with a default or missing password/secret. **Never set this on a reachable host.** |
+
+### Setting credentials
+
+`docker-compose.yml` reads both required values from the environment, so create a
+`.env` file next to it:
+
+```bash
+cat > .env <<EOF
+ADMIN_PASSWORD=$(openssl rand -base64 24)
+SECRET_KEY=$(openssl rand -base64 32)
+EOF
+```
+
+`docker compose up -d` will refuse to start until both are set.
+
+---
+
+## Security Notes
+
+The admin panel is the only authenticated surface; everything else is public by
+design. What protects it:
+
+- **Sessions expire.** Logging in mints a signed token valid for
+  `SESSION_TTL_HOURS`. The token is not derived from the password, so it can
+  lapse without a password change.
+- **Login attempts are rate limited** per client address. The limit is held in
+  memory, so it applies per process -- correct for this single-container
+  application, but a multi-replica deployment would need shared state.
+- **No shipped credentials.** The application will not start on a default or
+  missing `ADMIN_PASSWORD`/`SECRET_KEY`.
+- **Uploads are restricted** to PNG, JPEG, GIF and WebP, verified against the
+  file's leading bytes rather than its extension, and capped at `MAX_UPLOAD_MB`.
+  SVG is rejected: uploads are served from the application's own origin, and an
+  SVG can carry script. Uploaded files are additionally served under a
+  `default-src 'none'; sandbox` policy.
+- **A Content-Security-Policy** restricts script to the application itself and
+  the embed providers it uses. `frame-src` is permissive because embedding an
+  arbitrary publisher's document is the point; `script-src` is what keeps that
+  from becoming code execution.
+
+If you put this behind a reverse proxy, terminate TLS there and forward the real
+client address, otherwise every login attempt appears to come from the proxy and
+the rate limit will apply to all users collectively.
 
 ---
 

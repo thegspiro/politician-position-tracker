@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -24,14 +24,80 @@ from .schemas import IssueOut, PoliticianOut, SourceOut, StatementOut
 
 app = FastAPI(title="Politician Position Tracker")
 
-# CORS is only needed during local dev (Vite on :5173 -> FastAPI on :8000)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# --- Security headers ---
+#
+# The application embeds third-party media, so the policy has to name the hosts
+# those embeds come from. It is deliberately strict about what may execute:
+# script-src lists only the embed providers, and object-src is closed entirely.
+#
+# frame-src is broad because a "document" source can point at any publisher's
+# PDF. Framing arbitrary https documents is the feature; executing arbitrary
+# script is not, and script-src is what prevents that.
+CSP_DIRECTIVES = [
+    "default-src 'self'",
+    "script-src 'self' https://platform.twitter.com https://embed.bsky.app "
+    "https://cdn.syndication.twimg.com",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "media-src 'self' https:",
+    "font-src 'self' data:",
+    "connect-src 'self' https://embed.bsky.app https://cdn.syndication.twimg.com",
+    "frame-src https:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+]
+
+# Set CONTENT_SECURITY_POLICY to override the default, or to the empty string to
+# disable the header while diagnosing a blocked embed.
+CONTENT_SECURITY_POLICY = os.environ.get(
+    "CONTENT_SECURITY_POLICY", "; ".join(CSP_DIRECTIVES)
 )
+
+# Uploaded files are attacker-influenced content served from our own origin.
+# This policy lets nothing in them run, load or navigate.
+UPLOAD_CSP = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox"
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
+    )
+
+    if request.url.path.startswith("/uploads/"):
+        response.headers["Content-Security-Policy"] = UPLOAD_CSP
+        response.headers["X-Frame-Options"] = "DENY"
+    elif CONTENT_SECURITY_POLICY:
+        response.headers.setdefault(
+            "Content-Security-Policy", CONTENT_SECURITY_POLICY
+        )
+
+    return response
+
+
+# CORS is only needed during local dev (Vite on :5173 -> FastAPI on :8000), so
+# it is off unless CORS_ORIGINS names the origins to allow. Enabling it in
+# production would let another site make credentialed requests to this API.
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
+if CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Include routers
 app.include_router(auth_router)
@@ -51,7 +117,34 @@ def health():
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/data/uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "5")) * 1024 * 1024
+_UPLOAD_CHUNK = 64 * 1024
+
+# SVG is deliberately absent. Uploads are served from the application's own
+# origin, and an SVG is a script-bearing document: opening one would execute
+# attacker-controlled JavaScript with access to same-origin storage. Raster
+# formats cannot do this.
+ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+
+# Leading bytes each accepted format must start with. Checked so that the
+# extension cannot be used to disguise a different file type.
+_MAGIC_PREFIXES: dict[str, tuple[bytes, ...]] = {
+    ".png": (b"\x89PNG\r\n\x1a\n",),
+    ".jpg": (b"\xff\xd8\xff",),
+    ".jpeg": (b"\xff\xd8\xff",),
+    ".gif": (b"GIF87a", b"GIF89a"),
+    ".webp": (b"RIFF",),
+}
+
+
+def _content_matches_extension(head: bytes, ext: str) -> bool:
+    prefixes = _MAGIC_PREFIXES.get(ext, ())
+    if not any(head.startswith(prefix) for prefix in prefixes):
+        return False
+    # RIFF is a container; confirm the WEBP form specifically.
+    if ext == ".webp":
+        return len(head) >= 12 and head[8:12] == b"WEBP"
+    return True
 
 
 @app.post("/api/uploads")
@@ -61,16 +154,45 @@ def upload_file(
 ):
     ext = Path(file.filename).suffix.lower() if file.filename else ""
     if ext not in ALLOWED_EXTENSIONS:
-        from fastapi import HTTPException
         raise HTTPException(
             status_code=400,
-            detail=f"File type '{ext}' not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}",
+            detail=(
+                f"File type '{ext}' not allowed. "
+                f"Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+            ),
         )
+
+    head = file.file.read(12)
+    if not _content_matches_extension(head, ext):
+        raise HTTPException(
+            status_code=400,
+            detail=f"File content does not match the '{ext}' extension.",
+        )
+
     filename = f"{uuid.uuid4().hex}{ext}"
     dest = UPLOAD_DIR / filename
-    with open(dest, "wb") as f:
-        contents = file.file.read()
-        f.write(contents)
+
+    # Streamed with a running total so an oversized upload is refused instead of
+    # being read into memory in full.
+    written = len(head)
+    try:
+        with open(dest, "wb") as out:
+            out.write(head)
+            while chunk := file.file.read(_UPLOAD_CHUNK):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            "File is larger than the "
+                            f"{MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit."
+                        ),
+                    )
+                out.write(chunk)
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
+
     return {"url": f"/uploads/{filename}"}
 
 

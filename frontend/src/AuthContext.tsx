@@ -14,8 +14,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoggedIn, setIsLoggedIn] = useState(() => getToken() !== null);
 
   const login = useCallback(async (password: string) => {
-    const { token } = await apiLogin(password);
-    setToken(token);
+    const { token, expires_in } = await apiLogin(password);
+    setToken(token, expires_in);
     setIsLoggedIn(true);
   }, []);
 

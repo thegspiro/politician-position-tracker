@@ -8,7 +8,7 @@ round-trip through create, update, export and import.
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth import ADMIN_PASSWORD
+from tests.conftest import TEST_ADMIN_PASSWORD
 from app.main import app
 
 
@@ -20,7 +20,7 @@ def client():
 
 @pytest.fixture()
 def auth(client):
-    response = client.post("/api/auth/login", json={"password": ADMIN_PASSWORD})
+    response = client.post("/api/auth/login", json={"password": TEST_ADMIN_PASSWORD})
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['token']}"}
 
