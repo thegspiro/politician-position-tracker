@@ -41,7 +41,9 @@ def health():
 
 
 # --- Upload endpoint ---
-UPLOAD_DIR = Path("/app/data/uploads")
+# Defaults to the container path; overridable so the app can run (and be tested)
+# outside Docker without needing to create /app.
+UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/data/uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
@@ -229,6 +231,24 @@ def import_data(
 # --- Serve the React SPA from the built frontend ---
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
+
+def resolve_static_file(path: str) -> Path | None:
+    """Resolve a request path to a file inside STATIC_DIR, or None.
+
+    The request path is attacker-controlled and arrives percent-decoded, so it
+    can contain ".." segments that escape STATIC_DIR (e.g. "%2e%2e/data/...").
+    Resolving the candidate and requiring STATIC_DIR to be one of its parents
+    confines every response to the built frontend directory.
+    """
+    static_root = STATIC_DIR.resolve()
+    candidate = (static_root / path).resolve()
+    if static_root not in candidate.parents:
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
+
+
 if STATIC_DIR.is_dir():
     # Serve static assets (JS, CSS, images) at /assets
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
@@ -241,7 +261,7 @@ if STATIC_DIR.is_dir():
     # SPA catch-all: any non-API route serves index.html so React Router works
     @app.get("/{path:path}")
     async def serve_spa(request: Request, path: str):
-        file_path = STATIC_DIR / path
-        if file_path.is_file():
+        file_path = resolve_static_file(path)
+        if file_path is not None:
             return FileResponse(file_path)
         return FileResponse(STATIC_DIR / "index.html")

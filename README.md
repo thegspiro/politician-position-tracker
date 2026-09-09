@@ -83,6 +83,13 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
+Outside Docker the default upload directory (`/app/data/uploads`) is usually not
+writable. Set `UPLOAD_DIR` to a local path when running from a source checkout:
+
+```bash
+UPLOAD_DIR=./data/uploads uvicorn app.main:app --reload --port 8000
+```
+
 **Frontend:**
 
 ```bash
@@ -92,6 +99,14 @@ npm run dev
 ```
 
 The frontend dev server runs on `http://localhost:5173` and proxies API requests to `http://localhost:8000`.
+
+**Backend tests:**
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest tests/ -q
+```
 
 ---
 
