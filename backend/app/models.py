@@ -1,7 +1,7 @@
 import secrets
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Table, Text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Table, Text
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -18,6 +18,18 @@ MEDIA_TYPES = (
 )
 
 SOURCE_UID_LENGTH = 12
+
+# Chicago has distinct forms for legislative and legal material. document_type
+# selects one; it is only meaningful when media_type is "document".
+DOCUMENT_TYPES = (
+    "bill",
+    "statute",
+    "hearing",
+    "committee_report",
+    "court_opinion",
+    "executive_order",
+    "other",
+)
 
 
 def new_source_uid() -> str:
@@ -117,6 +129,27 @@ class Source(Base):
     excerpt = Column(Text, nullable=True)
     # Where in the source the excerpt lives: "p. 14", "sec. 203", "01:23:45".
     locator = Column(String(100), nullable=True)
+    # --- Citation fields ---
+    # Ordered list of {"family", "given"} or {"literal"} objects. JSON rather
+    # than a child table because authors are only ever read as an ordered list
+    # with their source, never queried across sources. The type maps to a native
+    # JSON column on MySQL and to serialised TEXT on SQLite.
+    #
+    # Left nullable with no server default: MySQL before 8.0.13 rejects DEFAULT
+    # on a JSON column. Readers normalise NULL to an empty list.
+    authors = Column(JSON, nullable=True)
+    # The larger work the source sits in: a newspaper, site, or journal.
+    container_title = Column(String(300), nullable=True)
+    edition = Column(String(100), nullable=True)
+
+    # --- Legislative and legal material ---
+    document_type = Column(String(40), nullable=True)
+    bill_number = Column(String(50), nullable=True)
+    congress_number = Column(Integer, nullable=True)
+    congress_session = Column(String(20), nullable=True)
+    committee = Column(String(300), nullable=True)
+    report_number = Column(String(50), nullable=True)
+
     # Snapshot used when the original URL rots.
     archive_url = Column(String(1000), nullable=True)
     archived_at = Column(DateTime, nullable=True)

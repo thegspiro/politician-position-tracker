@@ -1,6 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import json
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.orm import Session, joinedload
 
+from .. import citations, settings
 from ..auth import require_admin
 from ..database import get_db
 from ..models import Issue, Source, Statement, new_source_uid
@@ -31,12 +36,25 @@ SOURCE_FIELDS = (
     "archive_url",
     "archived_at",
     "retrieved_at",
+    "container_title",
+    "edition",
+    "document_type",
+    "bill_number",
+    "congress_number",
+    "congress_session",
+    "committee",
+    "report_number",
 )
 
 
 def _apply_source_fields(source: Source, data: SourceCreate, sort_order: int) -> None:
     for field in SOURCE_FIELDS:
         setattr(source, field, getattr(data, field))
+    # Authors are validated as models but stored in a JSON column, so they are
+    # written as plain dicts with empty entries dropped.
+    source.authors = [
+        author.model_dump(exclude_none=True) for author in data.authors
+    ] or None
     source.sort_order = sort_order
 
 
@@ -248,3 +266,130 @@ def delete_statement(
         raise HTTPException(status_code=404, detail="Statement not found")
     db.delete(statement)
     db.commit()
+
+
+# --- Citations ----------------------------------------------------------
+
+
+def _load_statement_for_citation(statement_id: int, db: Session) -> Statement:
+    statement = (
+        db.query(Statement)
+        .options(joinedload(Statement.politician), joinedload(Statement.sources))
+        .filter(Statement.id == statement_id)
+        .first()
+    )
+    if not statement:
+        raise HTTPException(status_code=404, detail="Statement not found")
+    return statement
+
+
+def _ordered_sources(statement: Statement) -> list[Source]:
+    return sorted(statement.sources, key=lambda s: (s.sort_order, s.id))
+
+
+def _page_url(request: Request, statement_id: int) -> str:
+    """The public URL of this statement's page, for the "cite this page" form.
+
+    Derived from the request, so it is correct behind a reverse proxy only when
+    the proxy forwards the original host and uvicorn is run with
+    --proxy-headers. SITE_URL overrides it when that is not the case.
+    """
+    configured = os.environ.get("SITE_URL", "").strip().rstrip("/")
+    if configured:
+        return f"{configured}/statements/{statement_id}"
+    return str(request.base_url).rstrip("/") + f"/statements/{statement_id}"
+
+
+def _citation_inputs(
+    statement: Statement, request: Request
+) -> tuple[list[tuple[Source, citations.CitationInput]], citations.CitationInput, citations.CitationInput]:
+    sources = [
+        (source, citations.from_source(source)) for source in _ordered_sources(statement)
+    ]
+    post = citations.from_statement_post(statement)
+    page = citations.from_statement_page(
+        statement, settings.SITE_NAME, _page_url(request, statement.id)
+    )
+    return sources, post, page
+
+
+@router.get("/{statement_id}/citations")
+def get_statement_citations(
+    statement_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Every citation for a statement: its sources, its post, and its page."""
+    statement = _load_statement_for_citation(statement_id, db)
+    sources, post, page = _citation_inputs(statement, request)
+
+    return {
+        "default_style": settings.CITATION_STYLE,
+        "site_name": settings.SITE_NAME,
+        "sources": [
+            {
+                "uid": source.uid,
+                "source_type": source.source_type,
+                "sort_order": source.sort_order,
+                **citations.render_all(data),
+            }
+            for source, data in sources
+        ],
+        "post": citations.render_all(post),
+        "page": citations.render_all(page),
+    }
+
+
+def _export_entries(
+    statement: Statement, request: Request
+) -> list[tuple[str, citations.CitationInput]]:
+    """Every citable item for a statement, keyed by a stable export id."""
+    sources, post, page = _citation_inputs(statement, request)
+    entries = [(f"source-{source.uid}", data) for source, data in sources]
+    entries.append((f"post-{statement.id}", post))
+    entries.append((f"statement-{statement.id}", page))
+    return entries
+
+
+@router.get("/{statement_id}/citations.json")
+def export_statement_citations_csl(
+    statement_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """CSL-JSON, the interchange format Zotero and pandoc read."""
+    statement = _load_statement_for_citation(statement_id, db)
+    payload = [
+        citations.to_csl_json(data, entry_id)
+        for entry_id, data in _export_entries(statement, request)
+    ]
+    return Response(
+        content=json.dumps(payload, indent=2),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="statement-{statement_id}-citations.json"'
+            )
+        },
+    )
+
+
+@router.get("/{statement_id}/citations.bib", response_class=PlainTextResponse)
+def export_statement_citations_bibtex(
+    statement_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    statement = _load_statement_for_citation(statement_id, db)
+    body = "\n\n".join(
+        citations.to_bibtex(data, entry_key)
+        for entry_key, data in _export_entries(statement, request)
+    )
+    return PlainTextResponse(
+        content=body + "\n",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="statement-{statement_id}-citations.bib"'
+            )
+        },
+    )

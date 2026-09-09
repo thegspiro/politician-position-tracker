@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from . import citations, settings
 from .auth import require_admin, router as auth_router
 from .database import get_db
 from .models import Issue, Politician, Source, Statement, new_source_uid
@@ -109,6 +110,16 @@ app.include_router(statements.router)
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/config")
+def public_config():
+    """Site settings the frontend needs before rendering."""
+    return {
+        "site_name": settings.SITE_NAME,
+        "citation_style": settings.CITATION_STYLE,
+        "citation_styles": list(citations.CITATION_STYLES),
+    }
 
 
 # --- Upload endpoint ---
@@ -370,6 +381,15 @@ def import_data(
                 archived_at=_parse_datetime(src_data.get("archived_at")),
                 retrieved_at=_parse_datetime(src_data.get("retrieved_at")),
                 sort_order=src_data.get("sort_order", position),
+                authors=src_data.get("authors") or None,
+                container_title=src_data.get("container_title"),
+                edition=src_data.get("edition"),
+                document_type=src_data.get("document_type"),
+                bill_number=src_data.get("bill_number"),
+                congress_number=src_data.get("congress_number"),
+                congress_session=src_data.get("congress_session"),
+                committee=src_data.get("committee"),
+                report_number=src_data.get("report_number"),
             )
             db.add(source)
             stats["sources"] += 1
