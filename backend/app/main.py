@@ -10,12 +10,14 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
 from .auth import require_admin, router as auth_router
-from .database import Base, engine, get_db
+from .database import get_db
 from .models import Issue, Politician, Source, Statement
 from .routers import issues, politicians, statements
 from .schemas import IssueOut, PoliticianOut, SourceOut, StatementOut
 
-Base.metadata.create_all(bind=engine)
+# The schema is owned by Alembic, not by create_all. The container entrypoint
+# runs "alembic upgrade head" before starting the server; see the README for
+# the local development equivalent.
 
 app = FastAPI(title="Politician Position Tracker")
 

@@ -90,6 +90,14 @@ writable. Set `UPLOAD_DIR` to a local path when running from a source checkout:
 UPLOAD_DIR=./data/uploads uvicorn app.main:app --reload --port 8000
 ```
 
+The schema is managed by Alembic, so apply migrations before the first run (and
+after pulling changes that add any):
+
+```bash
+cd backend
+alembic upgrade head
+```
+
 **Frontend:**
 
 ```bash
@@ -107,6 +115,38 @@ cd backend
 pip install -r requirements-dev.txt
 python -m pytest tests/ -q
 ```
+
+---
+
+## Database Migrations
+
+The schema is owned by [Alembic](https://alembic.sqlalchemy.org/). The container
+entrypoint runs `alembic upgrade head` on every start, before the server binds,
+so a `docker compose pull && docker compose up -d` applies pending migrations
+automatically. Nothing needs to be run by hand for a normal upgrade.
+
+Working with migrations locally, from `backend/`:
+
+```bash
+alembic upgrade head        # apply everything pending
+alembic current             # show the revision the database is on
+alembic history             # list the migration chain
+alembic downgrade -1        # roll back one revision
+```
+
+To add a migration after changing `app/models.py`:
+
+```bash
+alembic revision --autogenerate -m "describe the change"
+```
+
+Review the generated file before committing it -- autogenerate does not detect
+every change, and column additions to a populated table usually need an explicit
+backfill (see `migrations/versions/0002_primary_source_fields.py` for the
+add-nullable, backfill, then set-NOT-NULL pattern).
+
+`DATABASE_URL` drives both the application and the migrations, so the same
+commands work against SQLite and MySQL without edits.
 
 ---
 
