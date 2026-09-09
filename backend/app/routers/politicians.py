@@ -14,7 +14,7 @@ from ..schemas import (
 router = APIRouter(prefix="/api/politicians", tags=["politicians"])
 
 
-@router.get("/", response_model=PaginatedResponse[PoliticianOut])
+@router.get("", response_model=PaginatedResponse[PoliticianOut])
 def list_politicians(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -47,7 +47,7 @@ def get_politician(politician_id: int, db: Session = Depends(get_db)):
     return politician
 
 
-@router.post("/", response_model=PoliticianOut, status_code=201)
+@router.post("", response_model=PoliticianOut, status_code=201)
 def create_politician(
     data: PoliticianCreate,
     _admin: str = Depends(require_admin),

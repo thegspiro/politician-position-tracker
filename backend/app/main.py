@@ -1,17 +1,20 @@
 import os
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Request, UploadFile
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .auth import require_admin, router as auth_router
 from .database import get_db
-from .models import Issue, Politician, Source, Statement
+from .models import Issue, Politician, Source, Statement, new_source_uid
 from .routers import issues, politicians, statements
 from .schemas import IssueOut, PoliticianOut, SourceOut, StatementOut
 
@@ -111,6 +114,16 @@ def export_data(
 
 
 # --- Data import endpoint ---
+def _parse_datetime(value: object) -> datetime | None:
+    """Parse an ISO-8601 string from a backup, tolerating a trailing "Z"."""
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 class ImportData(BaseModel):
     politicians: list[dict] = []
     issues: list[dict] = []
@@ -124,9 +137,12 @@ def import_data(
     db: Session = Depends(get_db),
 ):
     """Import data from a JSON backup. Merges with existing data (skips duplicates by name)."""
-    from datetime import datetime as dt
-
     stats = {"politicians": 0, "issues": 0, "statements": 0, "sources": 0}
+
+    # uids must stay unique. A backup taken from another instance can collide
+    # with a uid already present here, so taken uids are tracked and a fresh
+    # one is generated on conflict.
+    taken_uids = {uid for (uid,) in db.query(Source.uid).all()}
 
     # Map old IDs to new IDs
     politician_id_map: dict[int, int] = {}
@@ -181,12 +197,7 @@ def import_data(
         if existing:
             continue
 
-        post_date = None
-        if stmt_data.get("post_date"):
-            try:
-                post_date = dt.fromisoformat(stmt_data["post_date"].replace("Z", "+00:00"))
-            except (ValueError, AttributeError):
-                pass
+        post_date = _parse_datetime(stmt_data.get("post_date"))
 
         stmt = Statement(
             politician_id=new_pol_id,
@@ -205,7 +216,7 @@ def import_data(
             old_issue_id = issue_entry.get("id", 0)
             new_issue_id = issue_id_map.get(old_issue_id)
             if new_issue_id:
-                issue_obj = db.query(Issue).get(new_issue_id)
+                issue_obj = db.get(Issue, new_issue_id)
                 if issue_obj:
                     stmt.issues.append(issue_obj)
 
@@ -213,13 +224,30 @@ def import_data(
         db.flush()
 
         # Import sources
-        for src_data in stmt_data.get("sources", []):
+        for position, src_data in enumerate(stmt_data.get("sources", [])):
+            uid = src_data.get("uid")
+            if not uid or uid in taken_uids:
+                uid = new_source_uid()
+                while uid in taken_uids:
+                    uid = new_source_uid()
+            taken_uids.add(uid)
+
             source = Source(
                 statement_id=stmt.id,
+                uid=uid,
                 source_type=src_data.get("source_type", "analysis"),
                 title=src_data.get("title", ""),
                 url=src_data.get("url", ""),
                 description=src_data.get("description"),
+                media_type=src_data.get("media_type") or "webpage",
+                publisher=src_data.get("publisher"),
+                published_date=_parse_datetime(src_data.get("published_date")),
+                excerpt=src_data.get("excerpt"),
+                locator=src_data.get("locator"),
+                archive_url=src_data.get("archive_url"),
+                archived_at=_parse_datetime(src_data.get("archived_at")),
+                retrieved_at=_parse_datetime(src_data.get("retrieved_at")),
+                sort_order=src_data.get("sort_order", position),
             )
             db.add(source)
             stats["sources"] += 1
@@ -251,6 +279,16 @@ def resolve_static_file(path: str) -> Path | None:
     return candidate
 
 
+# Prefixes that belong to the backend. A request under one of these must never
+# be answered with the SPA shell, or a missing endpoint would look like a
+# successful HTML response to the client.
+BACKEND_PREFIXES = ("/api", "/uploads", "/docs", "/redoc", "/openapi.json")
+
+
+def _is_backend_path(path: str) -> bool:
+    return any(path == prefix or path.startswith(prefix + "/") for prefix in BACKEND_PREFIXES)
+
+
 if STATIC_DIR.is_dir():
     # Serve static assets (JS, CSS, images) at /assets
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
@@ -260,10 +298,17 @@ if STATIC_DIR.is_dir():
     async def favicon():
         return FileResponse(STATIC_DIR / "favicon.svg")
 
-    # SPA catch-all: any non-API route serves index.html so React Router works
-    @app.get("/{path:path}")
-    async def serve_spa(request: Request, path: str):
-        file_path = resolve_static_file(path)
+    # The SPA fallback is an exception handler rather than a "/{path:path}"
+    # route. A catch-all route matches before Starlette's trailing-slash
+    # redirect runs, so it shadowed every collection endpoint: a request for
+    # "/api/politicians" matched the catch-all and returned index.html instead
+    # of JSON. As a 404 handler it runs only after real routing has failed.
+    @app.exception_handler(StarletteHTTPException)
+    async def spa_fallback(request: Request, exc: StarletteHTTPException):
+        if exc.status_code != 404 or _is_backend_path(request.url.path):
+            return await http_exception_handler(request, exc)
+
+        file_path = resolve_static_file(request.url.path.lstrip("/"))
         if file_path is not None:
             return FileResponse(file_path)
         return FileResponse(STATIC_DIR / "index.html")

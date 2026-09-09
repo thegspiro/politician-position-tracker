@@ -96,3 +96,58 @@ def test_api_routes_are_unaffected(client):
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+# --- API routes must not be shadowed by the SPA fallback ----------------
+#
+# The SPA fallback used to be a "/{path:path}" catch-all route. Catch-all
+# routes match before Starlette's trailing-slash redirect, so every collection
+# endpoint was shadowed whenever the built frontend was present: a request for
+# "/api/politicians" -- the exact URL frontend/src/api.ts sends -- returned
+# index.html with a 200 instead of JSON.
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/politicians", "/api/issues", "/api/statements"],
+)
+def test_collection_endpoints_return_json_without_a_trailing_slash(client, path):
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert "items" in response.json()
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/politicians/", "/api/issues/", "/api/statements/"],
+)
+def test_collection_endpoints_still_accept_a_trailing_slash(client, path):
+    """The trailing-slash form is kept working for existing API consumers."""
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+
+
+def test_query_string_does_not_change_routing(client):
+    response = client.get("/api/statements?skip=0&limit=5")
+    assert response.status_code == 200
+    assert response.json()["limit"] == 5
+
+
+def test_unknown_api_path_returns_a_json_404_not_the_spa(client):
+    response = client.get("/api/does-not-exist")
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+
+
+def test_api_404_detail_is_preserved(client):
+    response = client.get("/api/statements/999999")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Statement not found"
+
+
+def test_unknown_uploads_path_is_not_answered_with_the_spa(client):
+    response = client.get("/uploads/missing.png")
+    assert response.status_code == 404
+    assert not response.text.startswith("<html>")
