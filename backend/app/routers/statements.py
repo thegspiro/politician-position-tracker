@@ -1,14 +1,16 @@
 import json
 import os
+from enum import Enum
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, Response
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from .. import citations, settings
 from ..auth import require_admin
 from ..database import get_db
-from ..models import Issue, Source, Statement, new_source_uid
+from ..models import Issue, Politician, Source, Statement, new_source_uid
 from ..schemas import (
     PaginatedResponse,
     SourceCreate,
@@ -19,6 +21,40 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/api/statements", tags=["statements"])
+
+
+class StatementSort(str, Enum):
+    """Orderings the timeline offers.
+
+    Sorting has to happen in the database: the timeline shows one page of
+    results, so ordering the rows the client already holds would only reorder
+    that page and would silently misrepresent the whole set.
+    """
+
+    newest = "newest"
+    oldest = "oldest"
+    politician_az = "politician-az"
+
+
+# A statement is dated by its post, falling back to when it was recorded. This
+# matches what the timeline displays, so the order agrees with the visible date.
+def _statement_date():
+    return func.coalesce(Statement.post_date, Statement.created_at)
+
+
+def apply_sort(query, sort: StatementSort):
+    """Order a statement query, always with a unique tiebreaker.
+
+    Without the trailing id, rows sharing a date can swap places between
+    requests, which makes paging past them unreliable.
+    """
+    if sort is StatementSort.oldest:
+        return query.order_by(_statement_date().asc(), Statement.id.asc())
+    if sort is StatementSort.politician_az:
+        return query.join(Statement.politician).order_by(
+            Politician.name.asc(), _statement_date().desc(), Statement.id.desc()
+        )
+    return query.order_by(_statement_date().desc(), Statement.id.desc())
 
 # Fields copied verbatim from the request onto a Source row. uid is excluded
 # because it is assigned on insert and never overwritten; sort_order is
@@ -103,6 +139,7 @@ def list_statements(
     issue_id: int | None = Query(None),
     platform: str | None = Query(None),
     search: str | None = Query(None),
+    sort: StatementSort = Query(StatementSort.newest),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -140,12 +177,7 @@ def list_statements(
         )
     total = count_query.distinct().count()
 
-    all_items = (
-        query.order_by(Statement.created_at.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
-    )
+    all_items = apply_sort(query, sort).offset(skip).limit(limit).all()
     # Deduplicate due to joinedload
     seen: set[int] = set()
     items = []

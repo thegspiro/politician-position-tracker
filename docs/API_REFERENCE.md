@@ -654,8 +654,28 @@ List statements with pagination and optional filters.
 | `issue_id` | integer | -- | Filter by issue ID (statements tagged with this issue) |
 | `platform` | string | -- | Filter by platform (e.g., "X", "YouTube", "Bluesky", "Truth Social") |
 | `search` | string | -- | Search in title, analysis, and post content (case-insensitive, partial match) |
+| `sort` | string | `newest` | Ordering: `newest`, `oldest`, or `politician-az`. Any other value returns 422 |
 | `skip` | integer | `0` | Offset |
 | `limit` | integer | `50` | Max results (1-200) |
+
+**Ordering**
+
+Sorting is applied in the database, before `skip`/`limit` cut the page, so a
+page of `oldest` results is the oldest of the whole matching set rather than
+the oldest of one page.
+
+| `sort` | Order |
+|---|---|
+| `newest` (default) | Post date descending, falling back to creation date when a statement has no `post_date` |
+| `oldest` | The same date ascending |
+| `politician-az` | Politician name A-Z, then that politician's statements newest first |
+
+Every ordering ends with a unique tiebreaker on `id`, so statements sharing a
+date keep a stable position across paged requests.
+
+Note: the default order uses the post date where one exists. Previously it used
+the creation date only, which meant a statement recorded today about a post from
+last year sorted as though it were new.
 
 **Response (200):**
 ```json

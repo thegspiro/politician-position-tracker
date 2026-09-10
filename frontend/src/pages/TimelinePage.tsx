@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchStatements, fetchPoliticians, fetchIssues } from '../api';
-import type { Statement, Politician, Issue } from '../types';
+import type { Statement, Politician, Issue, StatementSort } from '../types';
 
 function partyBadgeClass(party: string): string {
   const p = party.toLowerCase();
@@ -75,8 +75,6 @@ function snippetText(text: string, maxLen = 180): string {
   return text.slice(0, maxLen).trimEnd() + '...';
 }
 
-type SortOption = 'newest' | 'oldest' | 'politician-az';
-
 export default function TimelinePage() {
   const [statements, setStatements] = useState<Statement[]>([]);
   const [totalResults, setTotalResults] = useState(0);
@@ -88,7 +86,7 @@ export default function TimelinePage() {
   const [search, setSearch] = useState('');
   const [selectedPolitician, setSelectedPolitician] = useState('');
   const [selectedIssue, setSelectedIssue] = useState('');
-  const [sortBy, setSortBy] = useState<SortOption>('newest');
+  const [sortBy, setSortBy] = useState<StatementSort>('newest');
 
   // Load filter options on mount
   useEffect(() => {
@@ -109,6 +107,7 @@ export default function TimelinePage() {
       search: search || undefined,
       politician_id: selectedPolitician || undefined,
       issue_id: selectedIssue || undefined,
+      sort: sortBy,
     })
       .then((data) => {
         setStatements(data.items);
@@ -118,7 +117,7 @@ export default function TimelinePage() {
         setError(err instanceof Error ? err.message : 'Failed to load statements');
       })
       .finally(() => setLoading(false));
-  }, [search, selectedPolitician, selectedIssue]);
+  }, [search, selectedPolitician, selectedIssue, sortBy]);
 
   useEffect(() => {
     loadStatements();
@@ -131,32 +130,8 @@ export default function TimelinePage() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  // Client-side sorting
-  const sortedStatements = useMemo(() => {
-    const sorted = [...statements];
-    switch (sortBy) {
-      case 'newest':
-        sorted.sort(
-          (a, b) =>
-            new Date(b.post_date ?? b.created_at).getTime() -
-            new Date(a.post_date ?? a.created_at).getTime(),
-        );
-        break;
-      case 'oldest':
-        sorted.sort(
-          (a, b) =>
-            new Date(a.post_date ?? a.created_at).getTime() -
-            new Date(b.post_date ?? b.created_at).getTime(),
-        );
-        break;
-      case 'politician-az':
-        sorted.sort((a, b) =>
-          a.politician.name.localeCompare(b.politician.name),
-        );
-        break;
-    }
-    return sorted;
-  }, [statements, sortBy]);
+  // Sorting happens in the database. Reordering here would only reorder the
+  // page already loaded, so "oldest" would show the oldest of the newest page.
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
@@ -211,11 +186,11 @@ export default function TimelinePage() {
       {/* Sort dropdown + results count */}
       <div className="flex items-center justify-between mb-8">
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {!loading && !error && `Showing ${sortedStatements.length} of ${totalResults} results`}
+          {!loading && !error && `Showing ${statements.length} of ${totalResults} results`}
         </p>
         <select
           value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as SortOption)}
+          onChange={(e) => setSortBy(e.target.value as StatementSort)}
           className="px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] transition"
         >
           <option value="newest">Newest First</option>
@@ -245,7 +220,7 @@ export default function TimelinePage() {
       )}
 
       {/* Empty */}
-      {!loading && !error && sortedStatements.length === 0 && (
+      {!loading && !error && statements.length === 0 && (
         <div className="text-center py-16">
           <p className="text-[var(--color-text-secondary)] text-lg">No statements found.</p>
           {(search || selectedPolitician || selectedIssue) && (
@@ -257,13 +232,13 @@ export default function TimelinePage() {
       )}
 
       {/* Timeline feed */}
-      {!loading && !error && sortedStatements.length > 0 && (
+      {!loading && !error && statements.length > 0 && (
         <div className="relative">
           {/* Vertical line */}
           <div className="absolute left-4 top-0 bottom-0 w-px bg-[var(--color-border)]" />
 
           <div className="space-y-6">
-            {sortedStatements.map((stmt) => (
+            {statements.map((stmt) => (
               <div key={stmt.id} className="relative pl-10">
                 {/* Dot on timeline */}
                 <div className="absolute left-2.5 top-6 w-3 h-3 rounded-full bg-[var(--color-accent)] ring-4 ring-[var(--color-bg)]" />

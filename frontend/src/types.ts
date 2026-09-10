@@ -221,6 +221,11 @@ export interface IssueDetail extends Issue {
   statements: Statement[];
 }
 
+/** Orderings the statements list accepts. Must match the backend enum. */
+export const STATEMENT_SORTS = ['newest', 'oldest', 'politician-az'] as const;
+
+export type StatementSort = (typeof STATEMENT_SORTS)[number];
+
 export interface PaginatedResponse<T> {
   items: T[];
   total: number;

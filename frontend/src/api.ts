@@ -6,6 +6,7 @@ import type {
   Statement,
   SourcePayload,
   StatementCitations,
+  StatementSort,
   PaginatedResponse,
 } from './types';
 
@@ -204,7 +205,7 @@ export interface StatementQueryParams {
   search?: string;
   skip?: number;
   limit?: number;
-  sort?: string;
+  sort?: StatementSort;
 }
 
 export function fetchStatements(
