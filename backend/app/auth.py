@@ -1,15 +1,14 @@
-"""Admin authentication.
+"""Authentication.
 
-Sessions are short-lived signed tokens rather than a value derived from the
-password itself. The previous scheme returned HMAC(SECRET_KEY, ADMIN_PASSWORD),
-which never expired and never changed: anyone who captured it held admin access
-until the password or secret was rotated, and logging out could not revoke it.
+Logins are per-user. ADMIN_PASSWORD exists only to bootstrap the first owner
+account on a fresh install; once any account exists it no longer authenticates,
+so there is never an unprotected window and never a shared credential whose
+actions cannot be attributed to a person.
 
-The token is a JWT carrying a subject claim, so introducing named accounts later
-is an additive change rather than a format break.
+Sessions are short-lived signed tokens rather than a value derived from a
+password, so they expire on their own and a logout is meaningful.
 """
 
-import hmac
 import logging
 import os
 import secrets
@@ -21,6 +20,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from .database import get_db
+from .models import ROLE_OWNER, User
+from .passwords import verify_password
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +37,8 @@ ALGORITHM = "HS256"
 TOKEN_SUBJECT = "admin"
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+# Username given to the account bootstrapped from ADMIN_PASSWORD.
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin").strip() or "admin"
 SESSION_TTL_HOURS = int(os.environ.get("SESSION_TTL_HOURS", "12"))
 
 # Escape hatch for local development and for anyone upgrading who is not ready
@@ -158,15 +164,43 @@ def create_access_token(subject: str = TOKEN_SUBJECT) -> tuple[str, int]:
 
 class LoginRequest(BaseModel):
     password: str
+    # Optional so a client written against the single-password API keeps
+    # working: an omitted username means the bootstrap account.
+    username: str | None = None
 
 
 class LoginResponse(BaseModel):
     token: str
     expires_in: int
+    username: str
+    role: str
+    display_name: str | None = None
+
+
+def authenticate(db: Session, username: str, password: str) -> User | None:
+    """Return the user these credentials identify, or None.
+
+    ADMIN_PASSWORD is accepted only while no account exists, to bootstrap the
+    first owner. Once one does, it stops working entirely.
+    """
+    user = (
+        db.query(User)
+        .filter(User.username == username, User.is_active == 1)
+        .first()
+    )
+    if user is None:
+        # Hash anyway so a missing username takes the same time as a wrong
+        # password, rather than being distinguishable by how fast it fails.
+        verify_password(password, None)
+        return None
+
+    if not verify_password(password, user.password_hash):
+        return None
+    return user
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(data: LoginRequest, request: Request):
+def login(data: LoginRequest, request: Request, db: Session = Depends(get_db)):
     client = _client_key(request)
 
     retry_after = login_throttle.retry_after(client)
@@ -177,25 +211,37 @@ def login(data: LoginRequest, request: Request):
             headers={"Retry-After": str(retry_after)},
         )
 
-    # Constant-time comparison: a plain != leaks the length of the shared
-    # prefix through timing.
-    if not hmac.compare_digest(data.password, ADMIN_PASSWORD):
+    username = (data.username or ADMIN_USERNAME).strip()
+    user = authenticate(db, username, data.password)
+
+    if user is None:
         login_throttle.record_failure(client)
-        logger.warning("Failed admin login attempt from %s", client)
+        logger.warning("Failed login for %r from %s", username, client)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid password",
+            # Deliberately does not say which half was wrong.
+            detail="Invalid username or password",
         )
 
     login_throttle.reset(client)
-    token, expires_in = create_access_token()
-    return {"token": token, "expires_in": expires_in}
+    user.last_login_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    db.commit()
+
+    token, expires_in = create_access_token(user.uid)
+    return {
+        "token": token,
+        "expires_in": expires_in,
+        "username": user.username,
+        "role": user.role,
+        "display_name": user.display_name,
+    }
 
 
-def require_admin(
+def current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
-) -> str:
-    """Dependency that validates the bearer token and returns its subject."""
+    db: Session = Depends(get_db),
+) -> User:
+    """Resolve the bearer token to the account it belongs to."""
     unauthorized = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or missing token",
@@ -213,4 +259,23 @@ def require_admin(
     subject = payload.get("sub")
     if not subject:
         raise unauthorized
-    return subject
+
+    user = db.query(User).filter(User.uid == subject, User.is_active == 1).first()
+    if user is None:
+        # The account was deleted or deactivated after the token was issued.
+        raise unauthorized
+    return user
+
+
+# Any signed-in account may edit content.
+require_admin = current_user
+
+
+def require_owner(user: User = Depends(current_user)) -> User:
+    """Restrict an endpoint to owners, who alone manage accounts."""
+    if user.role != ROLE_OWNER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action requires an owner account",
+        )
+    return user

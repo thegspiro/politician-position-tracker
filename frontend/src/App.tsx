@@ -13,6 +13,7 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 import PoliticianForm from './pages/admin/PoliticianForm';
 import IssueForm from './pages/admin/IssueForm';
 import StatementForm from './pages/admin/StatementForm';
+import UsersPage from './pages/admin/UsersPage';
 
 // ── Theme toggle button ──────────────────────────────────────
 
@@ -125,6 +126,7 @@ function AppRoutes() {
           <Route path="/statements/:id" element={<StatementDetailPage />} />
 
           <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin/users" element={<UsersPage />} />
           <Route path="/admin/politicians/new" element={<PoliticianForm />} />
           <Route path="/admin/politicians/:id/edit" element={<PoliticianForm />} />
           <Route path="/admin/issues/new" element={<IssueForm />} />

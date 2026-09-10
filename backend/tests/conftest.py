@@ -52,3 +52,9 @@ def alembic_config(database_url: str) -> Config:
 
 # Bring the shared test database to head once for the whole session.
 command.upgrade(alembic_config(os.environ["DATABASE_URL"]), "head")
+
+# Logins are per-account, so the suite needs the owner the entrypoint would
+# normally create at container start.
+from app.bootstrap import bootstrap_owner  # noqa: E402
+
+bootstrap_owner()

@@ -7,6 +7,7 @@ import type {
   SourcePayload,
   StatementCitations,
   StatementSort,
+  User,
   PaginatedResponse,
 } from './types';
 
@@ -109,12 +110,64 @@ export interface LoginResponse {
   token: string;
   /** Token lifetime in seconds. */
   expires_in: number;
+  username: string;
+  role: string;
+  display_name: string | null;
 }
 
-export function login(password: string): Promise<LoginResponse> {
+export function login(
+  username: string,
+  password: string,
+): Promise<LoginResponse> {
   return request<LoginResponse>('/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+// ── Users ───────────────────────────────────────────────────
+
+export interface UserInput {
+  username: string;
+  password?: string;
+  display_name?: string | null;
+  role?: string;
+  is_active?: boolean;
+}
+
+export function fetchCurrentUser(): Promise<User> {
+  return request<User>('/users/me');
+}
+
+export function fetchUsers(): Promise<User[]> {
+  return request<User[]>('/users');
+}
+
+export function createUser(data: UserInput): Promise<User> {
+  return request<User>('/users', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function updateUser(uid: string, data: UserInput): Promise<User> {
+  return request<User>(`/users/${uid}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteUser(uid: string): Promise<void> {
+  return request<void>(`/users/${uid}`, { method: 'DELETE' });
+}
+
+export function changeOwnPassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  return request<void>('/users/me/password', {
+    method: 'POST',
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
   });
 }
 

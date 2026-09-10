@@ -4,6 +4,7 @@ import { useAuth } from '../../AuthContext';
 
 export default function LoginPage() {
   const { login } = useAuth();
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -13,7 +14,7 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      await login(password);
+      await login(username.trim(), password);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -37,6 +38,25 @@ export default function LoginPage() {
 
           <div>
             <label
+              htmlFor="username"
+              className="block text-sm font-medium text-[var(--color-text)] mb-1"
+            >
+              Username
+            </label>
+            <input
+              id="username"
+              type="text"
+              autoComplete="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent)] transition"
+              placeholder="Enter your username"
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label
               htmlFor="password"
               className="block text-sm font-medium text-[var(--color-text)] mb-1"
             >
@@ -48,14 +68,14 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent)] transition"
-              placeholder="Enter admin password"
-              autoFocus
+              autoComplete="current-password"
+              placeholder="Enter your password"
             />
           </div>
 
           <button
             type="submit"
-            disabled={loading || !password}
+            disabled={loading || !username.trim() || !password}
             className="w-full px-4 py-2 bg-[var(--color-accent)] text-white rounded-lg hover:bg-[var(--color-accent-hover)] transition font-medium disabled:opacity-50"
           >
             {loading ? 'Logging in...' : 'Login'}

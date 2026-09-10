@@ -5,7 +5,8 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, field_validator, model_validator
 
 from . import citations
-from .models import DOCUMENT_TYPES, MEDIA_TYPES
+from .models import DOCUMENT_TYPES, MEDIA_TYPES, ROLES
+from .passwords import MIN_PASSWORD_LENGTH, validate_password_strength
 
 T = TypeVar("T")
 
@@ -38,6 +39,114 @@ class PaginatedResponse(BaseModel, Generic[T]):
     total: int
     skip: int
     limit: int
+
+
+# --- Users ---
+def _check_password(value: str) -> str:
+    try:
+        validate_password_strength(value)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+    return value
+
+
+def _check_role(value: str) -> str:
+    if value not in ROLES:
+        raise ValueError(f"role must be one of {', '.join(ROLES)}")
+    return value
+
+
+def _check_username(value: str) -> str:
+    username = value.strip()
+    if len(username) < 3:
+        raise ValueError("Username must be at least 3 characters")
+    if len(username) > 150:
+        raise ValueError("Username must be at most 150 characters")
+    if not all(char.isalnum() or char in "._-@" for char in username):
+        raise ValueError(
+            "Username may contain only letters, digits and the characters . _ - @"
+        )
+    return username
+
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    display_name: str | None = None
+    role: str = "editor"
+    is_active: bool = True
+
+    _validate_username = field_validator("username")(classmethod(lambda cls, v: _check_username(v)))
+    _validate_password = field_validator("password")(classmethod(lambda cls, v: _check_password(v)))
+    _validate_role = field_validator("role")(classmethod(lambda cls, v: _check_role(v)))
+
+
+class UserUpdate(BaseModel):
+    """Every field optional: absent means "leave as is"."""
+
+    username: str | None = None
+    password: str | None = None
+    display_name: str | None = None
+    role: str | None = None
+    is_active: bool | None = None
+
+    @field_validator("username")
+    @classmethod
+    def _validate_username(cls, value: str | None) -> str | None:
+        return None if value is None else _check_username(value)
+
+    @field_validator("password")
+    @classmethod
+    def _validate_password(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return None
+        return _check_password(value)
+
+    @field_validator("role")
+    @classmethod
+    def _validate_role(cls, value: str | None) -> str | None:
+        return None if value is None else _check_role(value)
+
+
+class UserOut(BaseModel):
+    uid: str
+    username: str
+    display_name: str | None = None
+    role: str
+    is_active: bool
+    created_at: datetime
+    last_login_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+    @field_validator("is_active", mode="before")
+    @classmethod
+    def _coerce_is_active(cls, value):
+        """Stored as an integer so the column is portable across backends."""
+        return bool(value)
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+    _validate_new = field_validator("new_password")(
+        classmethod(lambda cls, v: _check_password(v))
+    )
+
+
+MINIMUM_PASSWORD_LENGTH = MIN_PASSWORD_LENGTH
+
+
+# --- Attribution ---
+class AttributionOut(BaseModel):
+    """Who a record is attributed to, as shown alongside it."""
+
+    uid: str
+    username: str
+    display_name: str | None = None
+
+    model_config = {"from_attributes": True}
 
 
 # --- Source ---
@@ -175,6 +284,8 @@ class CitationSet(BaseModel):
 class SourceOut(SourceBase):
     id: int
     uid: str
+    created_by: AttributionOut | None = None
+    updated_by: AttributionOut | None = None
     # Rendered server-side so the Chicago rules live in exactly one place and
     # the exported files cannot drift from what the page displays.
     citations: CitationSet | None = None
@@ -280,6 +391,8 @@ class StatementOut(StatementBase):
     politician: PoliticianOut
     issues: list[IssueOut] = []
     sources: list[SourceOut] = []
+    created_by: AttributionOut | None = None
+    updated_by: AttributionOut | None = None
 
     model_config = {"from_attributes": True}
 

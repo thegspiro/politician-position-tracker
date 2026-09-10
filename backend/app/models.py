@@ -18,6 +18,21 @@ MEDIA_TYPES = (
 )
 
 SOURCE_UID_LENGTH = 12
+USER_UID_LENGTH = 12
+
+# Only an owner may manage other accounts. Editors do everything else.
+ROLE_OWNER = "owner"
+ROLE_EDITOR = "editor"
+ROLES = (ROLE_OWNER, ROLE_EDITOR)
+
+
+def new_user_uid() -> str:
+    """A stable public identifier for a user.
+
+    Tokens carry the uid rather than the row id, so a token cannot be made to
+    reference a different account by an id being reused after a deletion.
+    """
+    return secrets.token_urlsafe(9)[:USER_UID_LENGTH]
 
 # Chicago has distinct forms for legislative and legal material. document_type
 # selects one; it is only meaningful when media_type is "document".
@@ -49,6 +64,27 @@ statement_issues = Table(
     Column("statement_id", Integer, ForeignKey("statements.id", ondelete="CASCADE"), primary_key=True),
     Column("issue_id", Integer, ForeignKey("issues.id", ondelete="CASCADE"), primary_key=True),
 )
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uid = Column(String(USER_UID_LENGTH), nullable=False, unique=True, index=True, default=new_user_uid)
+    username = Column(String(150), nullable=False, unique=True, index=True)
+    display_name = Column(String(200), nullable=True)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(String(20), nullable=False, default=ROLE_EDITOR)
+    # Deactivating keeps a user's attribution intact while ending their access;
+    # deleting them would orphan every record they created.
+    is_active = Column(Integer, nullable=False, default=1, server_default="1")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_login_at = Column(DateTime, nullable=True)
+
+    @property
+    def is_owner(self) -> bool:
+        return self.role == ROLE_OWNER
 
 
 class Politician(Base):
@@ -92,7 +128,14 @@ class Statement(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Attribution. SET NULL rather than CASCADE: removing an account must not
+    # delete the work it produced.
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     politician = relationship("Politician", back_populates="statements")
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    updated_by = relationship("User", foreign_keys=[updated_by_id])
     issues = relationship("Issue", secondary=statement_issues, back_populates="statements")
     sources = relationship(
         "Source",
@@ -157,4 +200,9 @@ class Source(Base):
     retrieved_at = Column(DateTime, nullable=True)
     sort_order = Column(Integer, nullable=False, default=0, server_default="0")
 
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     statement = relationship("Statement", back_populates="sources")
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    updated_by = relationship("User", foreign_keys=[updated_by_id])

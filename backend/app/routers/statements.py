@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from .. import archiving, citations, settings
 from ..auth import require_admin
 from ..database import get_db
-from ..models import Issue, Politician, Source, Statement, new_source_uid
+from ..models import Issue, Politician, Source, Statement, User, new_source_uid
 from ..schemas import (
     PaginatedResponse,
     SourceCreate,
@@ -86,7 +86,9 @@ SOURCE_FIELDS = (
 )
 
 
-def _apply_source_fields(source: Source, data: SourceCreate, sort_order: int) -> None:
+def _apply_source_fields(
+    source: Source, data: SourceCreate, sort_order: int, actor: User | None = None
+) -> None:
     for field in SOURCE_FIELDS:
         setattr(source, field, getattr(data, field))
     # Authors are validated as models but stored in a JSON column, so they are
@@ -95,10 +97,17 @@ def _apply_source_fields(source: Source, data: SourceCreate, sort_order: int) ->
         author.model_dump(exclude_none=True) for author in data.authors
     ] or None
     source.sort_order = sort_order
+    if actor is not None:
+        if source.created_by_id is None:
+            source.created_by_id = actor.id
+        source.updated_by_id = actor.id
 
 
 def sync_sources(
-    db: Session, statement_id: int, incoming: list[SourceCreate]
+    db: Session,
+    statement_id: int,
+    incoming: list[SourceCreate],
+    actor: User | None = None,
 ) -> None:
     """Reconcile a statement's sources with the submitted list.
 
@@ -129,7 +138,7 @@ def sync_sources(
             source = Source(statement_id=statement_id, uid=new_source_uid())
             db.add(source)
         submitted_uids.add(source.uid)
-        _apply_source_fields(source, data, position)
+        _apply_source_fields(source, data, position, actor)
 
     for uid, source in existing.items():
         if uid not in submitted_uids:
@@ -199,6 +208,8 @@ def get_statement(statement_id: int, db: Session = Depends(get_db)):
             joinedload(Statement.politician),
             joinedload(Statement.issues),
             joinedload(Statement.sources),
+            joinedload(Statement.created_by),
+            joinedload(Statement.updated_by),
         )
         .filter(Statement.id == statement_id)
         .first()
@@ -212,13 +223,15 @@ def get_statement(statement_id: int, db: Session = Depends(get_db)):
 def create_statement(
     data: StatementCreate,
     background: BackgroundTasks,
-    _admin: str = Depends(require_admin),
+    actor: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     sources_data = data.sources
     issue_ids = data.issue_ids
     statement_dict = data.model_dump(exclude={"sources", "issue_ids"})
     statement = Statement(**statement_dict)
+    statement.created_by_id = actor.id
+    statement.updated_by_id = actor.id
 
     # Attach issues
     if issue_ids:
@@ -230,7 +243,7 @@ def create_statement(
     db.add(statement)
     db.flush()
 
-    sync_sources(db, statement.id, sources_data)
+    sync_sources(db, statement.id, sources_data, actor)
 
     db.commit()
     db.refresh(statement)
@@ -243,6 +256,8 @@ def create_statement(
             joinedload(Statement.politician),
             joinedload(Statement.issues),
             joinedload(Statement.sources),
+            joinedload(Statement.created_by),
+            joinedload(Statement.updated_by),
         )
         .filter(Statement.id == statement.id)
         .first()
@@ -254,7 +269,7 @@ def update_statement(
     statement_id: int,
     data: StatementUpdate,
     background: BackgroundTasks,
-    _admin: str = Depends(require_admin),
+    actor: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     statement = db.query(Statement).filter(Statement.id == statement_id).first()
@@ -266,6 +281,7 @@ def update_statement(
     statement_dict = data.model_dump(exclude={"sources", "issue_ids"})
     for key, value in statement_dict.items():
         setattr(statement, key, value)
+    statement.updated_by_id = actor.id
 
     # Update issues
     if issue_ids is not None:
@@ -276,7 +292,7 @@ def update_statement(
     else:
         statement.issues = []
 
-    sync_sources(db, statement_id, sources_data)
+    sync_sources(db, statement_id, sources_data, actor)
 
     db.commit()
     db.refresh(statement)
@@ -288,6 +304,8 @@ def update_statement(
             joinedload(Statement.politician),
             joinedload(Statement.issues),
             joinedload(Statement.sources),
+            joinedload(Statement.created_by),
+            joinedload(Statement.updated_by),
         )
         .filter(Statement.id == statement.id)
         .first()

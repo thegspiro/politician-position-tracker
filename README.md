@@ -19,7 +19,8 @@ Built as a single-container Docker application with a FastAPI backend serving a 
 - **Link Rot Protection** -- Record an archive URL, archive date and retrieval date alongside every source, with optional automatic capture to the Wayback Machine
 - **Sourced Analysis** -- Write analysis with Markdown formatting and attach separate citation lists for the original post and your analysis
 - **Screenshot Backup** -- Upload screenshots of posts as a backup in case the original is deleted
-- **Admin Panel** -- Password-protected admin dashboard for managing all data with full CRUD operations
+- **Named Accounts** -- Per-user logins with owner and editor roles; statements and sources record who created and last edited them
+- **Admin Panel** -- Protected admin dashboard for managing all data with full CRUD operations
 - **Import/Export Backup** -- Export all data as JSON for backup, import from a backup file to restore or migrate
 - **Dark Mode** -- Light and dark themes with system preference detection and manual toggle
 - **Share Buttons** -- Share statements via X, Facebook, email, or copy link
@@ -166,6 +167,50 @@ that source's card.
 **Stable links.** Every source has a `uid` and its card is addressable as
 `#source-<uid>`. Editing a statement updates sources in place rather than
 recreating them, so those links survive edits.
+
+---
+
+## Accounts
+
+Logins are per-user. `ADMIN_PASSWORD` exists only to create the first account:
+on a fresh install the container entrypoint uses it to make an **owner**
+account (username from `ADMIN_USERNAME`, default `admin`). Once any account
+exists, `ADMIN_PASSWORD` no longer authenticates on its own -- it works only as
+that account's password, and should be changed from the admin panel.
+
+This means there is never an unprotected first boot, and never a shared
+credential whose actions cannot be attributed to a person.
+
+### Roles
+
+| Role | Can do |
+|---|---|
+| **Owner** | Everything, including creating, editing, deactivating and deleting accounts |
+| **Editor** | Manage all content -- politicians, issues, statements and sources -- but not accounts |
+
+Every account can change its own password. Role checks are enforced on the
+server; hiding a control in the UI is a convenience, never the control itself.
+
+The last owner cannot be demoted, deactivated or deleted, so a deployment can
+never be left with nobody able to manage accounts.
+
+### Attribution
+
+Statements and sources record who created and who last edited them, shown in
+the API as `created_by` and `updated_by`. Deleting an account does **not**
+delete its work: the foreign keys are `ON DELETE SET NULL`, so the records
+survive and simply stop naming an author. Deactivating an account instead of
+deleting it keeps the attribution intact while ending access.
+
+### Passwords
+
+Hashed with scrypt (RFC 7914) from the Python standard library, salted per
+password, with the cost parameters stored inside each hash so they can be
+raised later without invalidating existing passwords. scrypt is used in
+preference to bcrypt or argon2 because it needs no compiled extension, which
+keeps the image portable across Unraid, Docker, plain Linux and ARM hosts.
+
+Passwords must be at least 12 characters.
 
 ---
 
@@ -332,7 +377,8 @@ By default, data is stored at `/mnt/user/appdata/politician-tracker` on the Unra
 
 | Variable | Default | Required | Description |
 |---|---|---|---|
-| `ADMIN_PASSWORD` | *(none)* | **Yes** | Password for the admin panel. The application refuses to start if this is unset or `changeme`. |
+| `ADMIN_PASSWORD` | *(none)* | **Yes** | Seeds the first owner account on a fresh install, and is that account's password thereafter. The application refuses to start if this is unset or `changeme`. |
+| `ADMIN_USERNAME` | `admin` | No | Username given to the bootstrapped owner account. |
 | `SECRET_KEY` | *(none)* | **Yes** | Signs admin session tokens. Use a long random string: `openssl rand -base64 32`. The application refuses to start on a published default. |
 | `DATABASE_URL` | `sqlite:////app/data/politician_tracker.db` | No | SQLAlchemy database connection string. Defaults to SQLite in the data volume. |
 | `SESSION_TTL_HOURS` | `12` | No | How long an admin session lasts before re-login is required. |

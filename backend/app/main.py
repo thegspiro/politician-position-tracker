@@ -16,7 +16,7 @@ from . import citations, settings
 from .auth import require_admin, router as auth_router
 from .database import get_db
 from .models import Issue, Politician, Source, Statement, new_source_uid
-from .routers import issues, politicians, statements
+from .routers import issues, politicians, statements, users
 from .schemas import IssueOut, PoliticianOut, SourceOut, StatementOut
 
 # The schema is owned by Alembic, not by create_all. The container entrypoint
@@ -105,6 +105,7 @@ app.include_router(auth_router)
 app.include_router(politicians.router)
 app.include_router(issues.router)
 app.include_router(statements.router)
+app.include_router(users.router)
 
 
 @app.get("/api/health")

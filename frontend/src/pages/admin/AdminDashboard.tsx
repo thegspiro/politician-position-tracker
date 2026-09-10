@@ -17,7 +17,7 @@ import LoginPage from './LoginPage';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
-  const { isLoggedIn, logout } = useAuth();
+  const { isLoggedIn, logout, session } = useAuth();
   const { toast } = useToast();
   const [politicians, setPoliticians] = useState<Politician[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -187,11 +187,17 @@ export default function AdminDashboard() {
           >
             Export Backup
           </button>
+          <Link
+            to="/admin/users"
+            className="px-4 py-2 bg-[var(--color-bg-secondary)] text-[var(--color-text)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--color-border)] transition text-sm font-medium"
+          >
+            Accounts
+          </Link>
           <button
             onClick={logout}
             className="px-4 py-2 bg-[var(--color-danger)] text-white rounded-lg hover:opacity-90 transition text-sm font-medium"
           >
-            Logout
+            {session ? `Sign out ${session.username}` : 'Logout'}
           </button>
         </div>
       </div>

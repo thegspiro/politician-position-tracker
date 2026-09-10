@@ -129,6 +129,8 @@ export interface Source {
   report_number: string | null;
   /** Rendered server-side, so exports cannot drift from what is displayed. */
   citations?: CitationSet;
+  created_by?: Attribution | null;
+  updated_by?: Attribution | null;
 }
 
 export interface SourceInput {
@@ -211,6 +213,8 @@ export interface Statement {
   politician: Politician;
   issues: Issue[];
   sources?: Source[];
+  created_by?: Attribution | null;
+  updated_by?: Attribution | null;
 }
 
 export interface PoliticianDetail extends Politician {
@@ -225,6 +229,31 @@ export interface IssueDetail extends Issue {
 export const STATEMENT_SORTS = ['newest', 'oldest', 'politician-az'] as const;
 
 export type StatementSort = (typeof STATEMENT_SORTS)[number];
+
+export const ROLES = ['owner', 'editor'] as const;
+export type Role = (typeof ROLES)[number];
+
+export const ROLE_LABELS: Record<Role, string> = {
+  owner: 'Owner',
+  editor: 'Editor',
+};
+
+export interface User {
+  uid: string;
+  username: string;
+  display_name: string | null;
+  role: Role;
+  is_active: boolean;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+/** Who a record is attributed to. */
+export interface Attribution {
+  uid: string;
+  username: string;
+  display_name: string | null;
+}
 
 export interface PaginatedResponse<T> {
   items: T[];

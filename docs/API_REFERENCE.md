@@ -177,11 +177,26 @@ Authenticate with the admin password and receive a Bearer token.
 }
 ```
 
+**Request:**
+```json
+{
+  "username": "admin",
+  "password": "string"
+}
+```
+
+`username` is optional. Omitting it means the bootstrap account
+(`ADMIN_USERNAME`, default `admin`), so a client written against the earlier
+single-password API keeps working.
+
 **Response (200):**
 ```json
 {
   "token": "string",
-  "expires_in": 43200
+  "expires_in": 43200,
+  "username": "admin",
+  "role": "owner",
+  "display_name": "Administrator"
 }
 ```
 
@@ -193,9 +208,13 @@ endpoint returns 401 and a new login is required.
 **Response (401):**
 ```json
 {
-  "detail": "Invalid password"
+  "detail": "Invalid username or password"
 }
 ```
+
+The message is the same whether the username does not exist or the password is
+wrong, and a missing username costs the same time as a wrong password, so
+neither reveals which accounts exist.
 
 **Response (429):** returned once `LOGIN_MAX_ATTEMPTS` failed attempts have come
 from the same client address within `LOGIN_WINDOW_SECONDS`. Carries a
@@ -1230,3 +1249,82 @@ Health check endpoint. Used by the Docker `HEALTHCHECK` instruction to monitor c
 ```bash
 curl http://localhost:9847/api/health
 ```
+
+
+---
+
+## User Endpoints
+
+Accounts are managed by owners. Every signed-in account can read its own
+profile and change its own password.
+
+### GET /api/users
+
+List all accounts. **Auth Required**: owner.
+
+Returns an array of user objects. Password hashes are never included.
+
+```json
+[
+  {
+    "uid": "1_yxBdkA4tZy",
+    "username": "jrivera",
+    "display_name": "J. Rivera",
+    "role": "editor",
+    "is_active": true,
+    "created_at": "2026-09-10T00:00:00",
+    "last_login_at": "2026-09-10T09:14:00"
+  }
+]
+```
+
+### GET /api/users/me
+
+The signed-in account. **Auth Required**: any account.
+
+### POST /api/users
+
+Create an account. **Auth Required**: owner.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `username` | string | Yes | 3-150 characters; letters, digits and `. _ - @` |
+| `password` | string | Yes | At least 12 characters |
+| `display_name` | string or null | No | Shown in attribution |
+| `role` | string | No (default `editor`) | `owner` or `editor` |
+| `is_active` | boolean | No (default `true`) | Whether the account may sign in |
+
+**Response (400):** the username is already taken.
+**Response (422):** the username, password or role is invalid.
+
+### PUT /api/users/{uid}
+
+Update an account. **Auth Required**: owner. Every field is optional; an absent
+field is left unchanged. Sending `password` sets a new one.
+
+**Response (400):** the username is taken, the change would remove the last
+owner, or an owner tried to deactivate their own account.
+
+### DELETE /api/users/{uid}
+
+Delete an account. **Auth Required**: owner.
+
+Statements and sources the account created are kept; their attribution becomes
+null. Deactivate instead of deleting to keep attribution intact.
+
+**Response (400):** deleting your own account, or the last owner.
+
+### POST /api/users/me/password
+
+Change your own password. **Auth Required**: any account.
+
+```json
+{
+  "current_password": "string",
+  "new_password": "string"
+}
+```
+
+**Response (204):** changed.
+**Response (400):** the current password is incorrect.
+**Response (422):** the new password is shorter than 12 characters.

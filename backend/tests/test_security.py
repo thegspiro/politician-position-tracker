@@ -52,10 +52,25 @@ def test_login_returns_a_token_and_its_lifetime(client):
     assert body["expires_in"] == auth.SESSION_TTL_HOURS * 3600
 
 
-def test_token_carries_a_subject_and_an_expiry(client):
+def test_token_carries_the_account_uid_and_an_expiry(client):
+    """The subject is the account's uid, not its username or row id.
+
+    A uid cannot be reused after a deletion, so a token can never come to
+    reference a different account than the one it was issued for.
+    """
     claims = jwt.decode(login(client), auth.SECRET_KEY, algorithms=[auth.ALGORITHM])
-    assert claims["sub"] == "admin"
     assert claims["exp"] > claims["iat"]
+
+    from app.database import SessionLocal
+    from app.models import User
+
+    db = SessionLocal()
+    try:
+        owner = db.query(User).filter(User.username == auth.ADMIN_USERNAME).one()
+        assert claims["sub"] == owner.uid
+        assert claims["sub"] != owner.username
+    finally:
+        db.close()
 
 
 def test_token_is_not_derived_from_the_password(client):
