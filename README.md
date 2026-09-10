@@ -16,7 +16,7 @@ Built as a single-container Docker application with a FastAPI backend serving a 
 - **Chicago Citations** -- Every source, the tracked post, and the page itself formatted to the Chicago Manual of Style (18th ed.), in both Notes-Bibliography and Author-Date, with a per-reader style toggle
 - **Bibliography and Export** -- A reference list on every statement, copy-to-clipboard per entry, and BibTeX / CSL-JSON export for Zotero and pandoc
 - **Inline Citations** -- Cite a source from the analysis body with `[^1]`; the marker links to that source's card
-- **Link Rot Protection** -- Record an archive URL, archive date and retrieval date alongside every source
+- **Link Rot Protection** -- Record an archive URL, archive date and retrieval date alongside every source, with optional automatic capture to the Wayback Machine
 - **Sourced Analysis** -- Write analysis with Markdown formatting and attach separate citation lists for the original post and your analysis
 - **Screenshot Backup** -- Upload screenshots of posts as a backup in case the original is deleted
 - **Admin Panel** -- Password-protected admin dashboard for managing all data with full CRUD operations
@@ -169,6 +169,35 @@ recreating them, so those links survive edits.
 
 ---
 
+## Archiving
+
+A citation is only as durable as the page it points at, so every source can
+carry a Wayback Machine snapshot alongside the original URL.
+
+**Automatic capture** is off by default. Set `ARCHIVE_ENABLED=1` and saving a
+statement submits any source that has no snapshot yet. It runs after the
+response is sent, so a slow or unreachable archive service never delays a save,
+and a failed capture leaves the statement saved with its archive fields empty.
+
+**Manual capture** works whether or not automatic capture is on: an
+**Archive now** button appears on any saved source that has no snapshot. Use it
+to archive deliberately on a deployment that keeps the feature off, or to retry
+one that failed.
+
+Sources that already have an `archive_url` are never re-submitted, and a URL
+that is already a Wayback snapshot is refused rather than archiving the archive.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ARCHIVE_ENABLED` | *(off)* | Set to `1` to capture snapshots automatically on save. Requires outbound internet access from the container. |
+| `ARCHIVE_TIMEOUT_SECONDS` | `30` | How long to wait on the archive service before giving up. |
+
+Captures are submitted one at a time as statements are saved. The Wayback
+Machine rate-limits its save endpoint, so a bulk import with archiving enabled
+will see some captures fail; the **Archive now** button picks up the stragglers.
+
+---
+
 ## Citations
 
 Sources are formatted to the **Chicago Manual of Style, 18th edition**, in both
@@ -314,6 +343,8 @@ By default, data is stored at `/mnt/user/appdata/politician-tracker` on the Unra
 | `CONTENT_SECURITY_POLICY` | *(built-in)* | No | Overrides the default CSP. Set to an empty string to disable it while diagnosing a blocked embed. |
 | `SITE_NAME` | `Politician Tracker` | No | Site name used in the "cite this page" citation. |
 | `SITE_URL` | *(derived from the request)* | No | Public base URL, used in the "cite this page" citation. Set this when behind a reverse proxy that does not forward the original host. |
+| `ARCHIVE_ENABLED` | *(off)* | No | Capture Wayback snapshots automatically when a statement is saved. Requires outbound internet access. |
+| `ARCHIVE_TIMEOUT_SECONDS` | `30` | No | Timeout for a capture request. |
 | `CITATION_STYLE` | `notes-bibliography` | No | Default Chicago system: `notes-bibliography` or `author-date`. Readers can override it per browser. |
 | `CORS_ORIGINS` | *(empty)* | No | Comma-separated origins allowed to make credentialed API requests. Leave empty in production; the Vite dev server proxies `/api`, so local development does not need it either. |
 | `ALLOW_INSECURE_DEFAULTS` | *(unset)* | No | Set to `1` to start with a default or missing password/secret. **Never set this on a reachable host.** |

@@ -246,6 +246,22 @@ export function updateStatement(
   });
 }
 
+export interface ArchiveResponse {
+  archive_url: string;
+  archived_at: string | null;
+}
+
+/** Capture a Wayback snapshot for one source, on demand. */
+export function archiveSource(
+  statementId: number | string,
+  uid: string,
+): Promise<ArchiveResponse> {
+  return request<ArchiveResponse>(
+    `/statements/${statementId}/sources/${uid}/archive`,
+    { method: 'POST' },
+  );
+}
+
 export function fetchStatementCitations(
   id: number | string,
 ): Promise<StatementCitations> {

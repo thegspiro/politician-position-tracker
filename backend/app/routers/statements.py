@@ -1,13 +1,14 @@
 import json
+import logging
 import os
 from enum import Enum
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from .. import citations, settings
+from .. import archiving, citations, settings
 from ..auth import require_admin
 from ..database import get_db
 from ..models import Issue, Politician, Source, Statement, new_source_uid
@@ -19,6 +20,8 @@ from ..schemas import (
     StatementOut,
     StatementUpdate,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/statements", tags=["statements"])
 
@@ -208,6 +211,7 @@ def get_statement(statement_id: int, db: Session = Depends(get_db)):
 @router.post("", response_model=StatementOut, status_code=201)
 def create_statement(
     data: StatementCreate,
+    background: BackgroundTasks,
     _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -230,6 +234,7 @@ def create_statement(
 
     db.commit()
     db.refresh(statement)
+    schedule_archiving(background, statement.id)
 
     # Reload with relationships
     return (
@@ -248,6 +253,7 @@ def create_statement(
 def update_statement(
     statement_id: int,
     data: StatementUpdate,
+    background: BackgroundTasks,
     _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -274,6 +280,7 @@ def update_statement(
 
     db.commit()
     db.refresh(statement)
+    schedule_archiving(background, statement_id)
 
     return (
         db.query(Statement)
@@ -298,6 +305,88 @@ def delete_statement(
         raise HTTPException(status_code=404, detail="Statement not found")
     db.delete(statement)
     db.commit()
+
+
+# --- Archiving ----------------------------------------------------------
+
+
+def archive_pending_sources(statement_id: int) -> None:
+    """Capture snapshots for a statement's un-archived sources.
+
+    Runs after the response has been sent, so a slow or unreachable archive
+    service never delays a save. Each source is committed on its own: one
+    failure must not discard the snapshots that did succeed.
+    """
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        sources = (
+            db.query(Source)
+            .filter(Source.statement_id == statement_id, Source.archive_url.is_(None))
+            .all()
+        )
+        for source in sources:
+            if not archiving.is_submittable(source.url):
+                continue
+            result = archiving.archive_url(source.url)
+            if not result.ok:
+                continue
+            source.archive_url = result.url
+            source.archived_at = result.timestamp
+            db.commit()
+    except Exception:
+        logger.exception("Archiving sources for statement %s failed", statement_id)
+        db.rollback()
+    finally:
+        db.close()
+
+
+def schedule_archiving(background: BackgroundTasks, statement_id: int) -> None:
+    if archiving.ARCHIVE_ENABLED:
+        background.add_task(archive_pending_sources, statement_id)
+
+
+@router.post("/{statement_id}/sources/{uid}/archive")
+def archive_source_now(
+    statement_id: int,
+    uid: str,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Capture a snapshot for one source on demand.
+
+    Available whether or not automatic archiving is enabled, so a deployment
+    that keeps it off can still archive deliberately, and a source whose
+    automatic capture failed can be retried without re-saving the statement.
+    """
+    source = (
+        db.query(Source)
+        .filter(Source.statement_id == statement_id, Source.uid == uid)
+        .first()
+    )
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    if not archiving.is_submittable(source.url):
+        raise HTTPException(
+            status_code=400, detail="This source's URL cannot be archived"
+        )
+
+    result = archiving.archive_url(source.url)
+    if not result.ok:
+        # The archive service is outside our control, so this is a gateway
+        # failure rather than a fault in the request.
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not archive this source: {result.error}",
+        )
+
+    source.archive_url = result.url
+    source.archived_at = result.timestamp
+    db.commit()
+    db.refresh(source)
+    return {"archive_url": source.archive_url, "archived_at": source.archived_at}
 
 
 # --- Citations ----------------------------------------------------------

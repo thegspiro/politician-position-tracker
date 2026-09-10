@@ -460,6 +460,7 @@ export default function StatementForm() {
           sourceType="post"
           sources={postSources}
           onChange={setPostSources}
+          statementId={id ? Number(id) : undefined}
           numberOffset={0}
         />
 
@@ -471,6 +472,7 @@ export default function StatementForm() {
           sourceType="analysis"
           sources={analysisSources}
           onChange={setAnalysisSources}
+          statementId={id ? Number(id) : undefined}
           numberOffset={postSources.length}
         />
 

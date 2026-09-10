@@ -985,6 +985,32 @@ curl -X PUT http://localhost:9847/api/statements/1 \
 
 Delete a statement and all its sources.
 
+---
+
+### POST /api/statements/{statement_id}/sources/{uid}/archive
+
+Capture a Wayback Machine snapshot for one source and store it on that source.
+
+**Auth Required**: Yes
+
+Works whether or not `ARCHIVE_ENABLED` is set, so a deployment that keeps
+automatic archiving off can still archive deliberately, and a source whose
+automatic capture failed can be retried without re-saving the statement.
+
+**Response (200):**
+```json
+{
+  "archive_url": "https://web.archive.org/web/20260114000000/https://congress.gov/bill",
+  "archived_at": "2026-01-14T00:00:00"
+}
+```
+
+**Response (400):** the source URL cannot be archived (not `http(s)`, or already a Wayback snapshot).
+
+**Response (404):** no source with that `uid` belongs to this statement.
+
+**Response (502):** the archive service could not be reached or refused the capture. The source is left unchanged.
+
 **Auth Required**: Yes
 
 **Path Parameters:**

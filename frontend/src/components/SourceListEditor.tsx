@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { archiveSource } from '../api';
 import type { Author, SourceInput } from '../types';
 import {
   DOCUMENT_TYPES,
@@ -38,6 +39,58 @@ function emptySource(type: 'post' | 'analysis'): SourceInput {
  * never inverts a corporate name, so names are captured in parts rather than
  * as one string.
  */
+/**
+ * Capture a Wayback snapshot for a saved source.
+ *
+ * Only offered for a source that already exists on the server: a uid is what
+ * the endpoint addresses, and one is assigned on save.
+ */
+function ArchiveNowButton({
+  statementId,
+  uid,
+  onArchived,
+}: {
+  statementId: number;
+  uid: string;
+  onArchived: (url: string, archivedAt: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleClick() {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await archiveSource(statementId, uid);
+      onArchived(result.archive_url, (result.archived_at ?? '').slice(0, 10));
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? 'Could not archive. The archive service may be busy; try again.'
+          : 'Could not archive.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={busy}
+        className="px-2 py-1 text-xs rounded border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] transition disabled:opacity-50"
+      >
+        {busy ? 'Archiving...' : 'Archive now'}
+      </button>
+      {error && (
+        <p className="text-xs text-[var(--color-danger)] mt-1">{error}</p>
+      )}
+    </div>
+  );
+}
+
 function AuthorsEditor({
   authors,
   onChange,
@@ -153,6 +206,7 @@ export default function SourceListEditor({
   sourceType,
   sources,
   onChange,
+  statementId,
   numberOffset,
 }: {
   legend: string;
@@ -162,6 +216,8 @@ export default function SourceListEditor({
   sourceType: 'post' | 'analysis';
   sources: SourceInput[];
   onChange: (next: SourceInput[]) => void;
+  /** Set when editing a saved statement, which is what enables archiving. */
+  statementId?: number;
   /**
    * Number of sources listed before this one. Citation markers are numbered
    * across both lists combined, so the number shown here has to match the one
@@ -445,6 +501,23 @@ export default function SourceListEditor({
                   onChange={(e) => update(index, 'archive_url', e.target.value)}
                   className={inputClass}
                 />
+                {statementId !== undefined && source.uid && !source.archive_url && (
+                  <div className="mt-2">
+                    <ArchiveNowButton
+                      statementId={statementId}
+                      uid={source.uid}
+                      onArchived={(url, archivedAt) => {
+                        const next = [...sources];
+                        next[index] = {
+                          ...next[index],
+                          archive_url: url,
+                          archived_at: archivedAt,
+                        };
+                        onChange(next);
+                      }}
+                    />
+                  </div>
+                )}
               </Field>
               <Field label="Archived on">
                 <input
