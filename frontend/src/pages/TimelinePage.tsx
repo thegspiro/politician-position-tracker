@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchStatements, fetchPoliticians, fetchIssues } from '../api';
 import type { Statement, Politician, Issue, StatementSort } from '../types';
@@ -75,9 +75,13 @@ function snippetText(text: string, maxLen = 180): string {
   return text.slice(0, maxLen).trimEnd() + '...';
 }
 
+/** Statements fetched per request, and appended per "Load more". */
+const PAGE_SIZE = 25;
+
 export default function TimelinePage() {
   const [statements, setStatements] = useState<Statement[]>([]);
   const [totalResults, setTotalResults] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [politicians, setPoliticians] = useState<Politician[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,15 +104,21 @@ export default function TimelinePage() {
       });
   }, []);
 
-  const loadStatements = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    fetchStatements({
+  const query = useMemo(
+    () => ({
       search: search || undefined,
       politician_id: selectedPolitician || undefined,
       issue_id: selectedIssue || undefined,
       sort: sortBy,
-    })
+    }),
+    [search, selectedPolitician, selectedIssue, sortBy],
+  );
+
+  /** Load the first page, replacing whatever is on screen. */
+  const loadStatements = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    fetchStatements({ ...query, skip: 0, limit: PAGE_SIZE })
       .then((data) => {
         setStatements(data.items);
         setTotalResults(data.total);
@@ -117,8 +127,33 @@ export default function TimelinePage() {
         setError(err instanceof Error ? err.message : 'Failed to load statements');
       })
       .finally(() => setLoading(false));
-  }, [search, selectedPolitician, selectedIssue, sortBy]);
+  }, [query]);
 
+  /** Append the next page. */
+  const loadMore = useCallback(() => {
+    setLoadingMore(true);
+    setError(null);
+    // skip is taken from what is on screen, so a page is never requested twice
+    // even if this fires while another request is settling.
+    const skip = statements.length;
+    fetchStatements({ ...query, skip, limit: PAGE_SIZE })
+      .then((data) => {
+        setStatements((current) => {
+          // Guard against a stale response: only append when the list has not
+          // been reset by a filter change since the request went out.
+          if (current.length !== skip) return current;
+          const seen = new Set(current.map((item) => item.id));
+          return [...current, ...data.items.filter((item) => !seen.has(item.id))];
+        });
+        setTotalResults(data.total);
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Failed to load more statements');
+      })
+      .finally(() => setLoadingMore(false));
+  }, [query, statements.length]);
+
+  // A filter or sort change restarts from the first page.
   useEffect(() => {
     loadStatements();
   }, [loadStatements]);
@@ -186,7 +221,11 @@ export default function TimelinePage() {
       {/* Sort dropdown + results count */}
       <div className="flex items-center justify-between mb-8">
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {!loading && !error && `Showing ${statements.length} of ${totalResults} results`}
+          {!loading &&
+            !error &&
+            `Showing ${statements.length} of ${totalResults} ${
+              totalResults === 1 ? 'result' : 'results'
+            }`}
         </p>
         <select
           value={sortBy}
@@ -295,6 +334,27 @@ export default function TimelinePage() {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Load more */}
+      {!loading && !error && statements.length > 0 && statements.length < totalResults && (
+        <div className="flex justify-center mt-8">
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="px-5 py-2.5 rounded-lg border border-[var(--color-border)] text-[var(--color-text)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loadingMore
+              ? 'Loading...'
+              : `Load ${Math.min(PAGE_SIZE, totalResults - statements.length)} more`}
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && totalResults > 0 && statements.length >= totalResults && (
+        <p className="text-center text-sm text-[var(--color-text-secondary)] mt-8">
+          End of results.
+        </p>
       )}
     </div>
   );

@@ -8,7 +8,7 @@ Built as a single-container Docker application with a FastAPI backend serving a 
 
 ## Features
 
-- **Timeline Feed** -- Browse all tracked statements in a chronological timeline with search, filters, and sort options
+- **Timeline Feed** -- Browse all tracked statements in a chronological timeline with search, filters, sorting applied across the whole set, and a "Load more" pager
 - **Politician Profiles** -- View all statements from a specific politician with photo, party, office, and state
 - **Issue Tracking** -- Tag statements with multiple issues and browse all statements for a given issue
 - **Social Media Embeds** -- Native embeds for X/Twitter, YouTube, and Bluesky posts; styled blockquotes for Truth Social
