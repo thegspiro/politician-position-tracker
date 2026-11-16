@@ -50,7 +50,7 @@ The Politician Position Tracker is a **single-container** web application.
 
 - **Single Container**: The FastAPI backend serves both the REST API and the built React SPA. No separate web server (nginx) or frontend container is needed.
 - **SQLite**: The database is a single file in the persistent volume. No external database server is required.
-- **Multi-Stage Docker Build**: Stage 1 uses Node 20 Alpine to build the React frontend. Stage 2 uses Python 3.12 Slim to run the backend, with the built frontend copied into `backend/static/`.
+- **Multi-Stage Docker Build**: Stage 1 uses Node 22 Alpine to build the React frontend. Stage 2 uses Python 3.12 Slim to run the backend, with the built frontend copied into `backend/static/`.
 - **SPA Catch-All**: Any request that does not match an API route or static file returns `index.html`, allowing React Router to handle client-side routing.
 - **Port Mapping**: The container internally runs on port 8000, but Docker Compose maps it to host port 9847 to avoid conflicts.
 

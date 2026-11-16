@@ -266,16 +266,18 @@ commands work against SQLite and MySQL without edits.
 Open the Unraid terminal and run:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/thegspiro/politician-position-tracker/main/install-unraid.sh | bash
+curl -sSL https://raw.githubusercontent.com/thegspiro/politician-position-tracker/main/install-unraid.sh | sh
 ```
 
 To customize the port or admin password:
 
 ```bash
-PORT=9847 ADMIN_PASSWORD=mysecurepassword curl -sSL https://raw.githubusercontent.com/thegspiro/politician-position-tracker/main/install-unraid.sh | bash
+PORT=9847 ADMIN_PASSWORD=mysecurepassword curl -sSL https://raw.githubusercontent.com/thegspiro/politician-position-tracker/main/install-unraid.sh | sh
 ```
 
-This clones the repo, builds the Docker image locally, creates the data directory, and starts the container.
+This pulls the prebuilt image from `ghcr.io/thegspiro/politician-position-tracker`, creates the data directory, and starts the container as `nobody:users` (`PUID=99`, `PGID=100`). Neither git nor a local build is needed.
+
+To build from source instead (requires git and enough RAM for the frontend build), set `BUILD_FROM_SOURCE=1`.
 
 ### Via Community Applications
 
@@ -296,6 +298,14 @@ This clones the repo, builds the Docker image locally, creates the data director
 ### Unraid Data Path
 
 By default, data is stored at `/mnt/user/appdata/politician-tracker` on the Unraid host. This directory contains the SQLite database and uploaded screenshot files.
+
+### Running as a non-root user (PUID / PGID)
+
+By default the container runs as root. Set `PUID` (and optionally `PGID`, which defaults to `PUID`) to have the entrypoint `chown` `/app/data` and then run as that user. The Unraid template and installer set `PUID=99` and `PGID=100`, so files in appdata belong to `nobody:users`. Both values must be numeric.
+
+### Published image
+
+`.github/workflows/docker-publish.yml` tests the code and pushes the image to GHCR on pushes to `main`, on `vX.Y.Z` tags, and on manual runs. GHCR packages are private the first time they are created: after the first publish, open the package's settings on GitHub and set its visibility to **Public** so Unraid can pull it without credentials.
 
 ---
 

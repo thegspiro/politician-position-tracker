@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Prebuilt image on GHCR** -- A GitHub Actions workflow runs the backend and frontend tests, then publishes `ghcr.io/thegspiro/politician-position-tracker`.
+- **`PUID` / `PGID`** -- Optional variables that make the entrypoint fix ownership of `/app/data` and run as that user. Unset, the container runs as root as before.
+
+### Changed
+
+- The Unraid template and `install-unraid.sh` pull the GHCR image instead of an image that was never published. The installer no longer needs git; `BUILD_FROM_SOURCE=1` keeps the old build path.
+- Frontend build stage uses `node:22-alpine` (Node 20 is end-of-life and the test tooling requires Node 22).
+- The healthcheck waits 60 seconds before counting failures and follows `PORT`.
+
+---
+
 ## [1.1.0] - 2025-07-15
 
 ### Added
