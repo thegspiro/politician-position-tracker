@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>PoliticianTracker</Name>
-  <Repository>politician-tracker</Repository>
-  <Registry>https://hub.docker.com/r/thegspiro/politician-tracker</Registry>
+  <Repository>ghcr.io/thegspiro/politician-position-tracker:latest</Repository>
+  <Registry>https://github.com/thegspiro/politician-position-tracker/pkgs/container/politician-position-tracker</Registry>
   <Branch>
     <Tag>latest</Tag>
     <TagDescription>Latest stable release</TagDescription>
@@ -26,7 +26,7 @@
   <Category>Productivity: Tools:</Category>
   <WebUI>http://[IP]:[PORT:9847]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/thegspiro/politician-position-tracker/main/unraid-template.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/thegspiro/politician-position-tracker/main/icon.png</Icon>
+  <Icon>https://raw.githubusercontent.com/thegspiro/politician-position-tracker/main/frontend/public/favicon.svg</Icon>
   <Description>
     Track politician statements from social media (X, Bluesky, Truth Social, YouTube) and
     analyze why they are problematic. Supports multiple issue tags, source citations,
@@ -61,6 +61,16 @@
       <Mode/>
     </Variable>
     <Variable>
+      <Value>99</Value>
+      <Name>PUID</Name>
+      <Mode/>
+    </Variable>
+    <Variable>
+      <Value>100</Value>
+      <Name>PGID</Name>
+      <Mode/>
+    </Variable>
+    <Variable>
       <Value>sqlite:////app/data/politician_tracker.db</Value>
       <Name>DATABASE_URL</Name>
       <Mode/>
@@ -70,5 +80,7 @@
   <Config Name="Data Path" Target="/app/data" Default="/mnt/user/appdata/politician-tracker" Mode="rw" Description="Path for database and uploaded files" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/politician-tracker</Config>
   <Config Name="Admin Password" Target="ADMIN_PASSWORD" Default="" Description="Required. Password for the admin panel. The container will not start without one." Type="Variable" Display="always" Required="true" Mask="true"/>
   <Config Name="Secret Key" Target="SECRET_KEY" Default="" Description="Required. Signs admin session tokens. Use a long random string, e.g. the output of: openssl rand -base64 32" Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="PUID" Target="PUID" Default="99" Description="User ID the app runs as. 99 is Unraid's nobody." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Description="Group ID the app runs as. 100 is Unraid's users." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
   <Config Name="Database URL" Target="DATABASE_URL" Default="sqlite:////app/data/politician_tracker.db" Description="Database connection string" Type="Variable" Display="advanced" Required="false" Mask="false">sqlite:////app/data/politician_tracker.db</Config>
 </Container>
